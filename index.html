@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Трекер Марка</title>
+<style>
+:root {
+  --bg:#f2f2f7;--card:#fff;--border:#e5e5ea;--text:#1c1c1e;--sub:#8e8e93;
+  --accent:#007aff;--accent-bg:#e5f0ff;
+  --green:#34c759;--green-bg:#e5f9ec;
+  --amber:#ff9500;--amber-bg:#fff4e5;
+  --red:#ff3b30;--red-bg:#fff0ef;
+  --purple:#af52de;--purple-bg:#f5ecff;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,'Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+.loading{position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading p{font-size:14px;color:var(--sub)}
+
+.sync-badge{position:fixed;top:10px;right:10px;z-index:200;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px;color:var(--sub);opacity:0;transition:opacity .3s;pointer-events:none}
+.sync-badge.on{opacity:1}
+
+.mode-pill{position:fixed;top:10px;left:10px;z-index:200;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:4px 10px;font-size:11px;color:var(--sub)}
+.mode-pill.notion{color:var(--green);border-color:var(--green-bg)}
+.mode-pill.local{color:var(--amber);border-color:var(--amber-bg)}
+
+#root{max-width:600px;margin:0 auto;padding-bottom:72px}
+.tab-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;background:rgba(255,255,255,.92);backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;z-index:100;padding-bottom:env(safe-area-inset-bottom,0)}
+.tbn{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 2px 6px;border:none;background:none;cursor:pointer;font-size:10px;color:var(--sub);gap:2px;transition:color .15s}
+.tbn .ic{font-size:21px;line-height:1}
+.tbn.on{color:var(--accent)}
+.panel{display:none;padding:12px}
+.panel.on{display:block}
+
+.card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:10px}
+.dh1{font-size:22px;font-weight:700;letter-spacing:-.5px}
+.dsub{color:var(--sub);font-size:13px;margin-top:3px}
+.etags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.etag{padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500}
+.etag.orch{background:var(--amber-bg);color:var(--amber)}
+.etag.live{background:var(--green-bg);color:var(--green)}
+.etag.busy{background:var(--red-bg);color:var(--red)}
+.etag.personal{background:var(--purple-bg);color:var(--purple)}
+
+.prog-wrap{margin-bottom:10px}
+.prog-row{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);margin-bottom:5px}
+.prog-track{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+
+.sblock{display:flex;align-items:flex-start;gap:12px;padding:11px 14px;background:var(--card);border-radius:12px;margin-bottom:6px;cursor:pointer}
+.sblock.done{opacity:.55}
+.sblock.done .sbt{text-decoration:line-through}
+.sbchk{width:22px;height:22px;border:2px solid var(--border);border-radius:6px;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;transition:all .15s}
+.sblock.done .sbchk{background:var(--accent);border-color:var(--accent)}
+.sbtime{font-size:12px;color:var(--sub);min-width:38px;padding-top:2px}
+.sbbody{flex:1}
+.sbt{font-size:15px;font-weight:500}
+.sbd{font-size:12px;color:var(--sub);margin-top:2px}
+.sbtag{display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:500;margin-top:4px}
+
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-nav h2{font-size:17px;font-weight:700}
+.cnbtn{width:34px;height:34px;border:1px solid var(--border);border-radius:9px;background:var(--card);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
+.cwdays{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px}
+.cwd{text-align:center;font-size:11px;color:var(--sub);font-weight:600;padding:4px 0}
+.cgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cday{aspect-ratio:1;border-radius:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:4px 2px;position:relative;overflow:hidden;background:var(--card);transition:transform .1s}
+.cday:active{transform:scale(.95)}
+.cday.other{opacity:.3}
+.cday.today{outline:2px solid var(--accent)}
+.cday.sel{background:var(--text);color:#fff}
+.cdnum{font-size:13px;font-weight:600;z-index:1;position:relative}
+.cddots{display:flex;gap:2px;flex-wrap:wrap;justify-content:center;margin-top:3px;z-index:1;position:relative}
+.cdot{width:5px;height:5px;border-radius:50%}
+.cdot.orch{background:var(--amber)}
+.cdot.live{background:var(--green)}
+.cdot.busy{background:var(--red)}
+.cdot.personal{background:var(--purple)}
+.cdprog{position:absolute;bottom:0;left:0;right:0;background:rgba(52,199,89,.18);transition:height .3s}
+
+.det{background:var(--card);border-radius:16px;padding:14px;margin-top:10px}
+.det h3{font-size:16px;font-weight:700;margin-bottom:10px}
+.det-ev{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)}
+.det-ev:last-of-type{border-bottom:none}
+.det-del{margin-left:auto;background:none;border:none;color:var(--sub);cursor:pointer;font-size:16px;padding:4px}
+.add-ev-btn{width:100%;padding:10px;border:1.5px dashed var(--border);border-radius:10px;background:none;cursor:pointer;color:var(--accent);font-size:14px;margin-top:8px}
+
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:300;display:flex;align-items:flex-end;justify-content:center}
+.modal{background:var(--card);border-radius:20px 20px 0 0;padding:24px 20px calc(20px + env(safe-area-inset-bottom,0));width:100%;max-width:600px}
+.modal h3{font-size:18px;font-weight:700;margin-bottom:16px}
+.etype-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.etbtn{padding:13px;border-radius:12px;border:2px solid var(--border);background:none;cursor:pointer;font-size:14px;font-weight:500;transition:all .15s}
+.etbtn.sel{border-color:var(--accent);background:var(--accent-bg)}
+.minput{width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font-size:15px;margin-bottom:14px;outline:none;font-family:inherit}
+.minput:focus{border-color:var(--accent)}
+.mactions{display:flex;gap:8px}
+.mbtn-p{flex:1;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer}
+.mbtn-s{padding:13px 18px;background:var(--bg);color:var(--text);border:none;border-radius:12px;font-size:15px;cursor:pointer}
+.mbtn-p:disabled{opacity:.5}
+
+.sec-ttl{font-size:18px;font-weight:700;margin:16px 0 10px;display:flex;align-items:center;gap:7px}
+.phase-card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:8px}
+.phase-card.locked{opacity:.5;pointer-events:none}
+.ph-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.ph-name{font-size:14px;font-weight:600}
+.ph-wks{font-size:12px;color:var(--sub);margin-top:2px}
+.ph-tasks{list-style:none;margin-top:8px}
+.ph-task{display:flex;align-items:flex-start;gap:9px;padding:6px 0;cursor:pointer;border-bottom:1px solid var(--bg)}
+.ph-task:last-child{border-bottom:none}
+.ph-task.done .ph-txt{text-decoration:line-through;color:var(--sub)}
+.tck{width:18px;height:18px;border:2px solid var(--border);border-radius:5px;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}
+.ph-task.done .tck{background:var(--green);border-color:var(--green)}
+.ph-txt{font-size:13px;line-height:1.4}
+.ph-link{font-size:12px;color:var(--accent);text-decoration:none;display:inline-block;margin-top:6px}
+
+.hab-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.hab-wlbl{font-size:14px;font-weight:600}
+.hab-grid{background:var(--card);border-radius:14px;overflow:hidden}
+.hab-hdr{display:grid;grid-template-columns:90px repeat(7,1fr);background:var(--bg);border-bottom:1px solid var(--border)}
+.hab-hdr div{text-align:center;font-size:10px;color:var(--sub);padding:6px 2px;font-weight:600}
+.hab-row{display:grid;grid-template-columns:90px repeat(7,1fr);border-bottom:1px solid var(--border)}
+.hab-row:last-child{border-bottom:none}
+.hab-name{padding:0 8px;font-size:11px;font-weight:500;display:flex;align-items:center;border-right:1px solid var(--border);min-height:44px}
+.hab-cell{display:flex;align-items:center;justify-content:center;cursor:pointer;min-height:44px}
+.hdot{width:24px;height:24px;border-radius:7px;border:2px solid var(--border);transition:all .15s}
+.hab-cell.done .hdot{background:var(--accent);border-color:var(--accent)}
+.hab-cell.tday .hdot{border-color:var(--accent)}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.stat-card{background:var(--card);border-radius:14px;padding:16px 12px;text-align:center}
+.stat-v{font-size:34px;font-weight:800;color:var(--accent);line-height:1}
+.stat-l{font-size:12px;color:var(--sub);margin-top:5px}
+.sec-lbl{font-size:13px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px 4px}
+.reset-btn{width:100%;padding:13px;background:var(--red-bg);color:var(--red);border:1px solid #ffcdd0;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px}
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <p id="load-msg">Загружаем...</p>
+</div>
+
+<div class="sync-badge" id="sync-badge">💾 Сохраняю...</div>
+<div class="mode-pill" id="mode-pill">⏳</div>
+
+<div id="root" style="display:none">
+  <div id="panel-today"      class="panel on"></div>
+  <div id="panel-tomorrow"   class="panel"></div>
+  <div id="panel-calendar"   class="panel">
+    <div class="cal-nav">
+      <button class="cnbtn" onclick="calPrev()">‹</button>
+      <h2 id="cal-title"></h2>
+      <button class="cnbtn" onclick="calNext()">›</button>
+    </div>
+    <div class="cwdays">
+      <div class="cwd">Пн</div><div class="cwd">Вт</div><div class="cwd">Ср</div>
+      <div class="cwd">Чт</div><div class="cwd">Пт</div><div class="cwd">Сб</div><div class="cwd">Вс</div>
+    </div>
+    <div class="cgrid" id="cal-grid"></div>
+    <div id="cal-det"></div>
+  </div>
+  <div id="panel-metodichka" class="panel"></div>
+  <div id="panel-habits"     class="panel"></div>
+  <div id="panel-stats"      class="panel"></div>
+</div>
+
+<nav class="tab-bar">
+  <button class="tbn on" id="tb-today"      onclick="showTab('today')">     <span class="ic">📅</span><span>Сегодня</span></button>
+  <button class="tbn"    id="tb-tomorrow"   onclick="showTab('tomorrow')">  <span class="ic">🌅</span><span>Завтра</span></button>
+  <button class="tbn"    id="tb-calendar"   onclick="showTab('calendar')">  <span class="ic">🗓</span><span>Календарь</span></button>
+  <button class="tbn"    id="tb-metodichka" onclick="showTab('metodichka')"><span class="ic">📚</span><span>Методичка</span></button>
+  <button class="tbn"    id="tb-habits"     onclick="showTab('habits')">    <span class="ic">✅</span><span>Привычки</span></button>
+  <button class="tbn"    id="tb-stats"      onclick="showTab('stats')">     <span class="ic">📊</span><span>Статистика</span></button>
+</nav>
+
+<div class="overlay" id="overlay" style="display:none" onclick="ovClick(event)">
+  <div class="modal">
+    <h3>Добавить событие</h3>
+    <div class="etype-grid">
+      <button class="etbtn sel" data-t="orch"     onclick="pickT(this)">🎼 Оркестр</button>
+      <button class="etbtn"     data-t="live"     onclick="pickT(this)">🎤 Лайв</button>
+      <button class="etbtn"     data-t="busy"     onclick="pickT(this)">📌 Дела</button>
+      <button class="etbtn"     data-t="personal" onclick="pickT(this)">👤 Личное</button>
+    </div>
+    <input class="minput" id="ev-desc" type="text" placeholder="Описание / название">
+    <div class="mactions">
+      <button class="mbtn-s" onclick="closeOv()">Отмена</button>
+      <button class="mbtn-p" id="ev-save-btn" onclick="saveEv()">Добавить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+// MANUAL EVENTS — Claude обновляет при новых событиях
+// ══════════════════════════════════════════════
+const MANUAL_EVENTS = [
+  {date:'2026-06-25',type:'live',desc:'ArtWave, ДРК',startTime:'08:00',endTime:'23:00',location:'Дворец Республики, Алматы'},
+];
+
+// ══════════════════════════════════════════════
+// FIREBASE
+// ══════════════════════════════════════════════
+const FB = 'https://schedule-6ff43-default-rtdb.firebaseio.com/tracker';
+
+// ══════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════
+const DB = {habits:{}, meta:{}, sched:{}};
+const GCAL = {};
+let dirty = new Set(), saveTimer = null;
+let curTab = 'today', calY, calM, selDay, habOff = 0;
+let syncMode = 'local';
+
+// ══════════════════════════════════════════════
+// TIME
+// ══════════════════════════════════════════════
+function alm(){const n=new Date();return new Date(n.getTime()+n.getTimezoneOffset()*60000+5*3600000)}
+function dk(d){return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`}
+function p(n){return String(n).padStart(2,'0')}
+function tom(){const d=alm();d.setDate(d.getDate()+1);return d}
+function toAlmTime(dtStr){
+  if(!dtStr) return null;
+  const ms=new Date(dtStr).getTime()+5*3600000;
+  const a=new Date(ms);
+  return `${String(a.getUTCHours()).padStart(2,'0')}:${String(a.getUTCMinutes()).padStart(2,'0')}`;
+}
+const MO=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const MG=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const DR=['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+const DS=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+
+// ══════════════════════════════════════════════
+// FIREBASE READ / WRITE
+// ══════════════════════════════════════════════
+async function fbRead(key){
+  try{
+    const r=await fetch(`${FB}/${key}.json`);
+    if(!r.ok) return {};
+    const d=await r.json();
+    return d||{};
+  }catch{return {};}
+}
+
+async function fbWrite(key,data){
+  try{
+    await fetch(`${FB}/${key}.json`,{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(data),
+    });
+  }catch{lsWrite(key,data);}
+}
+
+// ══════════════════════════════════════════════
+// LOCALSTORAGE FALLBACK
+// ══════════════════════════════════════════════
+const LS={habits:'mt_h',meta:'mt_m',sched:'mt_s'};
+function lsRead(k){try{return JSON.parse(localStorage.getItem(k))||{};}catch{return {};}}
+function lsWrite(k,d){try{localStorage.setItem(k,JSON.stringify(d));}catch{}}
+
+// ══════════════════════════════════════════════
+// DIRTY / FLUSH
+// ══════════════════════════════════════════════
+function markDirty(k){
+  dirty.add(k);
+  document.getElementById('sync-badge').classList.add('on');
+  if(saveTimer) clearTimeout(saveTimer);
+  saveTimer=setTimeout(flush,800);
+}
+
+async function flush(){
+  const tasks=[];
+  if(dirty.has('habits')) tasks.push(fbWrite('habits',DB.habits));
+  if(dirty.has('meta'))   tasks.push(fbWrite('meta',DB.meta));
+  if(dirty.has('sched'))  tasks.push(fbWrite('sched',DB.sched));
+  // также пишем в localStorage как кэш
+  if(dirty.has('habits')) lsWrite(LS.habits,DB.habits);
+  if(dirty.has('meta'))   lsWrite(LS.meta,DB.meta);
+  if(dirty.has('sched'))  lsWrite(LS.sched,DB.sched);
+  await Promise.all(tasks);
+  dirty.clear();
+  document.getElementById('sync-badge').classList.remove('on');
+}
+
+
+function loadManualEvents(){
+  for(const ev of MANUAL_EVENTS){
+    const e={id:ev.date+'_'+(ev.startTime||'00:00'),date:ev.date,type:ev.type||'live',
+      desc:ev.desc||'',startTime:ev.startTime||null,endTime:ev.endTime||null,
+      location:ev.location||null,isTracker:true};
+    if(!GCAL[e.date]) GCAL[e.date]=[];
+    if(!GCAL[e.date].some(x=>x.id===e.id)) GCAL[e.date].push(e);
+  }
+}
+
+function eventsOn(key){return GCAL[key]||[]}
+function addToGcalCache(ev){if(!GCAL[ev.date])GCAL[ev.date]=[];GCAL[ev.date].push(ev);}
+function removeFromGcalCache(key,id){if(GCAL[key])GCAL[key]=GCAL[key].filter(e=>e.id!==id);}
+
+// ══════════════════════════════════════════════
+// DATA ACCESSORS
+// ══════════════════════════════════════════════
+function hDone(d,h){return DB.habits[d]?.[h]??false}
+function setH(d,h,v){if(!DB.habits[d])DB.habits[d]={};DB.habits[d][h]=v;markDirty('habits')}
+function toggleH(d,h){setH(d,h,!hDone(d,h))}
+function bDone(d,i){return DB.sched[`${d}_${i}`]??false}
+function setB(d,i,v){DB.sched[`${d}_${i}`]=v;markDirty('sched')}
+function mDone(pid,ti){return DB.meta[`${pid}_${ti}`]??false}
+function toggleMeta(pid,ti){DB.meta[`${pid}_${ti}`]=!mDone(pid,ti);markDirty('meta');renderMeta();if(curTab==='stats')renderStats();}
+
+// ══════════════════════════════════════════════
+// SCHEDULES
+// ══════════════════════════════════════════════
+const CATS={
+  solf:{bg:'#ede9fe',c:'#7c3aed',l:'Сольфеджио'},
+  piano:{bg:'#dbeafe',c:'#2563eb',l:'Фортепиано'},
+  flute:{bg:'#dcfce7',c:'#16a34a',l:'Флейта'},
+  ear:{bg:'#fef3c7',c:'#d97706',l:'Ear Training'},
+  mix:{bg:'#fee2e2',c:'#dc2626',l:'Микс / Pro Tools'},
+  rest:{bg:'#f3f4f6',c:'#6b7280',l:''},
+  work:{bg:'#ecfdf5',c:'#059669',l:'Работа'},
+};
+
+const BASE=[
+  {t:'07:30',n:'Подъём',             d:'20 мин без телефона',          cat:'rest'},
+  {t:'07:50',n:'Зарядка / душ',      d:'',                             cat:'rest'},
+  {t:'08:20',n:'Завтрак',            d:'',                             cat:'rest'},
+  {t:'09:00',n:'Сольфеджио',         d:'25 мин',                       cat:'solf',h:'mix'},
+  {t:'09:25',n:'Перерыв',            d:'',                             cat:'rest'},
+  {t:'09:35',n:'Фортепиано',         d:'45 мин',                       cat:'piano',h:'piano'},
+  {t:'10:20',n:'Флейта',             d:'30 мин',                       cat:'flute',h:'flute'},
+  {t:'10:50',n:'Ear Training',       d:'20 мин',                       cat:'ear',h:'mix'},
+  {t:'11:10',n:'Перерыв',            d:'',                             cat:'rest'},
+  {t:'11:20',n:'Микс / Pro Tools',   d:'2 часа',                       cat:'mix',h:'mix'},
+  {t:'13:20',n:'Обед',               d:'',                             cat:'rest'},
+  {t:'14:00',n:'Теория / разбор',    d:'45 мин',                       cat:'solf',h:'mix'},
+  {t:'14:45',n:'Перерыв / прогулка', d:'',                             cat:'rest'},
+  {t:'15:15',n:'Микс / Pro Tools',   d:'продолжение, 1.5 часа',        cat:'mix',h:'mix'},
+  {t:'16:45',n:'Повторение',         d:'30 мин — инструмент / теория', cat:'piano'},
+  {t:'17:15',n:'Свободное время',    d:'',                             cat:'rest'},
+  {t:'22:30',n:'Ревью дня',          d:'',                             cat:'rest',h:'review'},
+  {t:'23:30',n:'Отбой',              d:'',                             cat:'rest'},
+];
+const S_SUN=[
+  {t:'08:00',n:'Подъём',          d:'День отдыха',            cat:'rest'},
+  {t:'08:30',n:'Завтрак',         d:'',                       cat:'rest'},
+  {t:'19:00',n:'Свободное время', d:'Отдых и восстановление', cat:'rest'},
+  {t:'22:30',n:'Ревью дня',       d:'',                       cat:'rest',h:'review'},
+  {t:'23:30',n:'Отбой',           d:'',                       cat:'rest'},
+];
+const S_SAT=[
+  {t:'07:30',n:'Подъём',             d:'20 мин без телефона', cat:'rest'},
+  {t:'07:50',n:'Зарядка / душ',      d:'',                    cat:'rest'},
+  {t:'08:20',n:'Завтрак',            d:'',                    cat:'rest'},
+  {t:'09:00',n:'Ear Training',       d:'20 мин',              cat:'ear',h:'mix'},
+  {t:'09:20',n:'Перерыв',            d:'',                    cat:'rest'},
+  {t:'09:30',n:'Pro Tools',          d:'1.5 часа',            cat:'mix',h:'mix'},
+  {t:'11:00',n:'Перерыв',            d:'',                    cat:'rest'},
+  {t:'11:10',n:'Микс',               d:'2 часа',              cat:'mix',h:'mix'},
+  {t:'13:10',n:'Обед',               d:'',                    cat:'rest'},
+  {t:'14:00',n:'Теория / разбор',    d:'1 час',               cat:'solf',h:'mix'},
+  {t:'15:00',n:'Перерыв / прогулка', d:'',                    cat:'rest'},
+  {t:'16:00',n:'Микс / свободно',    d:'',                    cat:'mix',h:'mix'},
+  {t:'17:00',n:'Свободное время',    d:'',                    cat:'rest'},
+  {t:'22:30',n:'Ревью дня',          d:'',                    cat:'rest',h:'review'},
+  {t:'23:30',n:'Отбой',              d:'',                    cat:'rest'},
+];
+const S_ORCH=[
+  {t:'07:00',n:'Подъём',           d:'Ранний — оркестр',    cat:'rest'},
+  {t:'07:30',n:'Завтрак / сборы',  d:'',                    cat:'rest'},
+  {t:'08:00',n:'Выезд',            d:'В филармонию',        cat:'rest'},
+  {t:'09:00',n:'Оркестр АКМИ',     d:'Репетиция / концерт', cat:'work'},
+  {t:'13:00',n:'Обед',             d:'',                    cat:'rest'},
+  {t:'14:00',n:'Ear Training',     d:'20 мин',              cat:'ear',h:'mix'},
+  {t:'14:20',n:'Фортепиано',       d:'30 мин',              cat:'piano',h:'piano'},
+  {t:'14:50',n:'Теория / разбор',  d:'45 мин',              cat:'solf',h:'mix'},
+  {t:'15:35',n:'Свободное время',  d:'',                    cat:'rest'},
+  {t:'22:30',n:'Ревью дня',        d:'',                    cat:'rest',h:'review'},
+  {t:'23:30',n:'Отбой',            d:'',                    cat:'rest'},
+];
+
+function tToMins(t){const[h,m]=(t||'00:00').split(':').map(Number);return h*60+m}
+function minsToT(m){m=((m%1440)+1440)%1440;return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`}
+
+function injectGcalWork(sc,evs){
+  const liveEvs=evs.filter(e=>e.type==='live'||e.type==='work');
+  if(!liveEvs.length){
+    // все события с конкретным временем добавляем как блоки
+    const extra=evs.filter(e=>e.startTime);
+    if(!extra.length) return sc;
+    const ico={busy:'📌',personal:'👤',orch:'🎼'};
+    return[...sc,...extra.map(e=>({t:e.startTime,n:(ico[e.type]||'📌')+' '+(e.desc||'Событие'),d:e.endTime?`до ${e.endTime}`:'',cat:e.type==='personal'?'rest':'work',_gcal:true}))]
+      .sort((a,b)=>a.t.localeCompare(b.t));
+  }
+  const ev=liveEvs[0];
+  const startMin=tToMins(ev.startTime||'20:00');
+  const endMin=ev.endTime?tToMins(ev.endTime):startMin+180;
+  const travel=30,departMin=startMin-travel,bfMin=departMin-35,shMin=bfMin-25,wakeMin=shMin-10;
+  const place=ev.location||ev.desc?.split(',')[0]||'место';
+  const ws=[
+    {t:minsToT(wakeMin),  n:'Подъём',           d:'Рабочий день',                    cat:'rest'},
+    {t:minsToT(shMin),    n:'Зарядка / душ',    d:'',                                cat:'rest'},
+    {t:minsToT(bfMin),    n:'Завтрак',           d:'',                                cat:'rest'},
+    {t:minsToT(departMin),n:'Выезд',             d:`${place} (~${travel} мин)`,       cat:'rest'},
+    {t:ev.startTime||'20:00',n:(ev.desc||'Прокат / лайв')+(ev.endTime?` (до ${ev.endTime})`:'')+'  🎤',d:ev.location||'',cat:'work',_gcal:true},
+  ];
+  const returnT=minsToT(endMin+travel);
+  ws.push({t:returnT,n:'Возвращение домой',d:'',cat:'rest'});
+  ws.push({t:minsToT(endMin+travel+20),n:'Ревью дня',d:'',cat:'rest',h:'review'});
+  ws.push({t:minsToT(endMin+travel+50),n:'Отбой',d:'',cat:'rest'});
+  return ws.sort((a,b)=>a.t.localeCompare(b.t));
+}
+
+function getSched(date){
+  const key=dk(date),evs=eventsOn(key);
+  if(evs.some(e=>e.type==='orch')) return injectGcalWork(S_ORCH,evs);
+  const dow=date.getDay();
+  if(dow===0) return injectGcalWork(S_SUN,evs);
+  if(dow===6) return injectGcalWork(S_SAT,evs);
+  if(dow===1||dow===3||dow===5) return injectGcalWork(BASE.filter(b=>b.n!=='Флейта'),evs);
+  return injectGcalWork(BASE.filter(b=>b.n!=='Фортепиано'),evs);
+}
+
+function rotLabel(d){
+  return['Вс: Отдых','Пн: Сольф+Форте+Слух+Микс','Вт: Сольф+Флейта+Слух+Микс','Ср: Сольф+Форте+Слух+Микс','Чт: Сольф+Флейта+Слух+Микс','Пт: Сольф+Форте+Слух+Микс','Сб: Pro Tools+Слух+Микс'][d.getDay()];
+}
+const EICO={orch:'🎼',live:'🎤',busy:'📌',personal:'👤'};
+
+// ══════════════════════════════════════════════
+// RENDER DAY
+// ══════════════════════════════════════════════
+function renderDay(pfx,date){
+  const key=dk(date),evs=eventsOn(key),sc=getSched(date);
+  const done=sc.filter((_,i)=>bDone(key,i)).length;
+  const pct=sc.length?Math.round(done/sc.length*100):0;
+  const tags=evs.map(e=>`<span class="etag ${e.type}">${EICO[e.type]} ${e.desc||''}</span>`).join('');
+  let html=`<div class="card">
+    <div><div class="dh1">${DR[date.getDay()]}, ${date.getDate()} ${MG[date.getMonth()]}</div>
+    <div class="dsub">${rotLabel(date)}</div></div>
+    ${tags?`<div class="etags">${tags}</div>`:''}
+  </div>
+  <div class="prog-wrap">
+    <div class="prog-row"><span>Выполнено</span><span>${done} / ${sc.length} · ${pct}%</span></div>
+    <div class="prog-track"><div class="prog-fill" style="width:${pct}%"></div></div>
+  </div>`;
+  sc.forEach((b,i)=>{
+    const isDone=bDone(key,i),cat=CATS[b.cat]||CATS.rest;
+    html+=`<div class="sblock${isDone?' done':''}" onclick="toggleBlock('${pfx}','${key}',${i},'${b.h||''}')">
+      <div class="sbchk">${isDone?'✓':''}</div>
+      <div class="sbbody">
+        <div class="sbtime">${b.t}</div>
+        <div class="sbt">${b.n}</div>
+        ${b.d?`<div class="sbd">${b.d}</div>`:''}
+        ${cat.l?`<span class="sbtag" style="background:${cat.bg};color:${cat.c}">${cat.l}</span>`:''}
+      </div></div>`;
+  });
+  document.getElementById('panel-'+pfx).innerHTML=html;
+}
+
+function toggleBlock(pfx,dateKey,idx,habit){
+  const nv=!bDone(dateKey,idx);
+  setB(dateKey,idx,nv);
+  if(habit) setH(dateKey,habit,nv);
+  renderDay(pfx,pfx==='today'?alm():tom());
+  if(curTab==='habits') renderHabits();
+  if(curTab==='stats')  renderStats();
+}
+
+// ══════════════════════════════════════════════
+// CALENDAR
+// ══════════════════════════════════════════════
+function calPrev(){calM--;if(calM<0){calM=11;calY--;}renderCal();}
+function calNext(){calM++;if(calM>11){calM=0;calY++;}renderCal();}
+
+function renderCal(){
+  document.getElementById('cal-title').textContent=`${MO[calM]} ${calY}`;
+  const todayKey=dk(alm());
+  const first=new Date(calY,calM,1);
+  let sd=first.getDay();if(sd===0)sd=7;sd--;
+  const dim=new Date(calY,calM+1,0).getDate();
+  const pdim=new Date(calY,calM,0).getDate();
+  const cells=[];
+  for(let i=sd-1;i>=0;i--) cells.push({d:new Date(calY,calM-1,pdim-i),o:true});
+  for(let i=1;i<=dim;i++) cells.push({d:new Date(calY,calM,i),o:false});
+  while(cells.length<42){const n=cells.length-sd-dim+1;cells.push({d:new Date(calY,calM+1,n),o:true});}
+  document.getElementById('cal-grid').innerHTML=cells.map(cell=>{
+    const key=dk(cell.d),evs=eventsOn(key),sc=getSched(cell.d);
+    const done=sc.filter((_,i)=>bDone(key,i)).length,pct=sc.length?done/sc.length*100:0;
+    const dots=evs.map(e=>`<div class="cdot ${e.type}"></div>`).join('');
+    return`<div class="cday${cell.o?' other':''}${key===todayKey?' today':''}${key===selDay?' sel':''}"
+      onclick="selCalDay('${key}',${cell.d.getFullYear()},${cell.d.getMonth()},${cell.d.getDate()})">
+      <div class="cdprog" style="height:${pct}%"></div>
+      <div class="cdnum">${cell.d.getDate()}</div>
+      ${dots?`<div class="cddots">${dots}</div>`:''}
+    </div>`;
+  }).join('');
+  if(selDay) renderDet(selDay);
+}
+
+function selCalDay(key,y,m,day){selDay=key;renderCal();renderDet(key,new Date(y,m,day));}
+
+function renderDet(key,d){
+  if(!d){const pts=key.split('-');d=new Date(+pts[0],+pts[1]-1,+pts[2]);}
+  const evs=eventsOn(key),sc=getSched(d);
+  const done=sc.filter((_,i)=>bDone(key,i)).length,pct=sc.length?Math.round(done/sc.length*100):0;
+  const ehtml=evs.map(e=>`<div class="det-ev">
+    <span class="etag ${e.type}">${EICO[e.type]} ${e.desc||''}</span>
+    ${e.isTracker?`<button class="det-del" onclick="delEv('${e.id}','${key}')">✕</button>`:''}
+  </div>`).join('');
+  const schedHtml=sc.map((b,i)=>{
+    const isDone=bDone(key,i),cat=CATS[b.cat]||CATS.rest;
+    return`<div class="sblock${isDone?' done':''}" onclick="toggleCalBlock('${key}',${i},'${b.h||''}')">
+      <div class="sbchk">${isDone?'✓':''}</div>
+      <div class="sbbody">
+        <div class="sbtime">${b.t}</div><div class="sbt">${b.n}</div>
+        ${b.d?`<div class="sbd">${b.d}</div>`:''}
+        ${cat.l?`<span class="sbtag" style="background:${cat.bg};color:${cat.c}">${cat.l}</span>`:''}
+      </div></div>`;
+  }).join('');
+  document.getElementById('cal-det').innerHTML=`<div class="det">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h3 style="margin:0">${DR[d.getDay()]}, ${d.getDate()} ${MG[d.getMonth()]}</h3>
+      <span style="font-size:12px;color:var(--sub)">${done}/${sc.length} · ${pct}%</span>
+    </div>
+    <div class="prog-track" style="margin-bottom:12px"><div class="prog-fill" style="width:${pct}%"></div></div>
+    ${ehtml}
+    <button class="add-ev-btn" onclick="openOv('${key}')">+ Добавить событие</button>
+    <div style="margin-top:10px">${schedHtml}</div>
+  </div>`;
+}
+
+function toggleCalBlock(dateKey,idx,habit){
+  const nv=!bDone(dateKey,idx);
+  setB(dateKey,idx,nv);
+  if(habit) setH(dateKey,habit,nv);
+  const pts=dateKey.split('-');
+  renderDet(dateKey,new Date(+pts[0],+pts[1]-1,+pts[2]));
+  renderCal();
+  if(curTab==='habits') renderHabits();
+  if(curTab==='stats')  renderStats();
+}
+
+// ══════════════════════════════════════════════
+// EVENTS MODAL
+// ══════════════════════════════════════════════
+let ovDk=null,ovType='orch';
+function openOv(key){ovDk=key;ovType='orch';document.getElementById('ev-desc').value='';updateTypeBtns();document.getElementById('overlay').style.display='flex';}
+function closeOv(){document.getElementById('overlay').style.display='none';}
+function ovClick(e){if(e.target===document.getElementById('overlay'))closeOv();}
+function pickT(btn){ovType=btn.dataset.t;updateTypeBtns();}
+function updateTypeBtns(){document.querySelectorAll('.etbtn').forEach(b=>b.classList.toggle('sel',b.dataset.t===ovType));}
+
+function saveEv(){
+  const desc=document.getElementById('ev-desc').value.trim();
+  const ev={id:ovDk+'_'+ovType+'_'+Date.now(),date:ovDk,type:ovType,
+    desc:desc||{orch:'Оркестр АКМИ',live:'Лайв',busy:'Дела',personal:'Личное'}[ovType],
+    isTracker:true,startTime:null,endTime:null,location:null};
+  addToGcalCache(ev);closeOv();renderCal();
+  if(curTab==='today') renderDay('today',alm());
+  if(curTab==='tomorrow') renderDay('tomorrow',tom());
+}
+function delEv(id,dateKey){
+  removeFromGcalCache(dateKey,id);renderCal();
+  if(curTab==='today') renderDay('today',alm());
+  if(curTab==='tomorrow') renderDay('tomorrow',tom());
+}
+
+// ══════════════════════════════════════════════
+// МЕТОДИЧКА
+// ══════════════════════════════════════════════
+const CURR=[
+  {id:'solf',title:'Сольфеджио',ico:'🎼',phases:[
+    {id:'solf1',title:'Ноты и ритм',wks:'нед. 1–4',unlock:null,
+     tasks:['Читать ноты в скрипичном ключе (Ми-Соль-Си-Ре-Фа)','Ритм: четверть, восьмая, половинная — отстукивать','Петь простую мелодию по нотам'],
+     link:'https://musictheory.net/lessons'},
+    {id:'solf2',title:'Интервалы и пение',wks:'нед. 5–10',unlock:'solf1',
+     tasks:['Петь гамму До мажор по нотам','Диктант — записать мелодию на слух','Интонировать: терция, квинта, октава']},
+    {id:'solf3',title:'Тональности',wks:'нед. 11–20',unlock:'solf2',
+     tasks:['Знаки при ключе — до 3 диезов и бемолей','Хроматическая гамма — петь и записывать','Транспозиция мелодии в другую тональность']},
+  ]},
+  {id:'ear',title:'Ear Training',ico:'👂',phases:[
+    {id:'ear1',title:'Интервалы',wks:'нед. 1–4',unlock:'solf1',
+     tasks:['musictheory.net — ear interval','Ассоциации: мал. терция = «Подмосковные вечера»','Различать приму / терцию / квинту / октаву'],
+     link:'https://musictheory.net/lessons'},
+    {id:'ear2',title:'Аккорды и лады',wks:'нед. 5–8',unlock:'ear1',
+     tasks:['musictheory.net — ear chord','Мажор / минор / доминант-септ на слух','Анализ трека — тональность, первые 4 аккорда']},
+    {id:'ear3',title:'Тембр и частоты',wks:'нед. 9–16',unlock:'ear2',
+     tasks:['Quiztones — угадывать поднятую/срезанную частоту','200–400 Гц = каша, 1–3 кГц = присутствие, 5–8 кГц = резкость','Слышать компрессию без плагина']},
+  ]},
+  {id:'piano',title:'Фортепиано',ico:'🎹',phases:[
+    {id:'piano1',title:'Постановка рук',wks:'нед. 1–4',unlock:'solf1',
+     tasks:['Разогрев 5 мин — сжимать пальцы, вращать запястья','До-ре-ми-фа-соль каждой рукой, медленно с весом','Бах «Менуэт» соль мажор BWV Anh.114 — по 2 такта'],
+     link:'https://imslp.org'},
+    {id:'piano2',title:'Гаммы + аккорды',wks:'нед. 5–10',unlock:'piano1',
+     tasks:['Гамма До мажор двумя руками, 2 октавы, 60 bpm','Трезвучия До–Фа–Соль с левым басом','Пьеса по 4 такта с метрономом']},
+    {id:'piano3',title:'Джаз',wks:'нед. 11–20',unlock:'piano2',
+     tasks:['Гаммы Соль и Ре мажор','Cmaj7, Dm7, G7 — аппликатура и переходы','Autumn Leaves — только аккорды левой рукой'],
+     link:'https://musicnotes.com'},
+  ]},
+  {id:'flute',title:'Флейта',ico:'🎵',phases:[
+    {id:'flute1',title:'Возобновление',wks:'нед. 1–2',unlock:'solf1',
+     tasks:['Долгие ноты Ля/Си/До — один вдох, ровно','Гамма До мажор одна октава, 50–60 bpm','Простая мелодия наизусть + запись на телефон']},
+    {id:'flute2',title:'Техника',wks:'нед. 3–8',unlock:'flute1',
+     tasks:['Долгие ноты хроматически — разогрев','Гаммы двух октав + арпеджио (До, Соль, Ре мажор)','Этюд с метрономом (Андерсен op.33) + запись раз в неделю'],
+     link:'https://imslp.org'},
+  ]},
+  {id:'mix',title:'Микс + Pro Tools',ico:'🎚',phases:[
+    {id:'mix1',title:'Среда + анализ',wks:'нед. 1–3',unlock:null,
+     tasks:['Edit/Mix window, Smart Tool F6, шорткаты (Cmd+=, R, Space, B)','Clip Gain vs Input Gain — разница','Референс в PT — спектр EQ3, 3 наблюдения']},
+    {id:'mix2',title:'Сессия + баланс',wks:'нед. 4–6',unlock:'mix1',
+     tasks:['Dante I/O, шаблон .ptx, naming convention','Грубый баланс без плагинов — только фейдеры и пан','EQ расчистка — HPF на каждом треке']},
+    {id:'mix3',title:'Плотность и динамика',wks:'нед. 7–10',unlock:'mix2',
+     tasks:['Dyn3 компрессия на кике и снейре — bypass test','Параллельная компрессия на Aux bus','Сатурация на drum/bass bus + тест на телефоне']},
+    {id:'mix4',title:'Реальные проекты',wks:'нед. 11+',unlock:'mix3',
+     tasks:['Каждый проект: референс → баланс → EQ → динамика → пространство → 3 системы','Logic vs PT — сравнение workflow']},
+  ]},
+];
+
+function phById(id){for(const s of CURR)for(const ph of s.phases)if(ph.id===id)return ph;return null}
+function phComplete(id){const ph=phById(id);return ph?ph.tasks.every((_,i)=>mDone(id,i)):false}
+function phUnlocked(id){const ph=phById(id);if(!ph)return false;return!ph.unlock||phComplete(ph.unlock)}
+
+function renderMeta(){
+  let html='';
+  for(const s of CURR){
+    html+=`<div class="sec-ttl">${s.ico} ${s.title}</div>`;
+    for(const ph of s.phases){
+      const ul=phUnlocked(ph.id),done=ph.tasks.filter((_,i)=>mDone(ph.id,i)).length,pct=Math.round(done/ph.tasks.length*100);
+      html+=`<div class="phase-card${ul?'':' locked'}">
+        <div class="ph-head"><div><div class="ph-name">${ph.title}</div><div class="ph-wks">${ph.wks}</div></div><div>${ul?'':'🔒'}</div></div>
+        <div class="prog-row"><span>${done}/${ph.tasks.length}</span><span>${pct}%</span></div>
+        <div class="prog-track" style="margin-bottom:10px"><div class="prog-fill" style="width:${pct}%"></div></div>
+        <ul class="ph-tasks">`;
+      ph.tasks.forEach((t,i)=>{
+        const d=mDone(ph.id,i);
+        html+=`<li class="ph-task${d?' done':''}" onclick="toggleMeta('${ph.id}',${i})">
+          <div class="tck">${d?'✓':''}</div><span class="ph-txt">${t}</span></li>`;
+      });
+      if(ph.link) html+=`<li style="padding:6px 0"><a class="ph-link" href="${ph.link}" target="_blank">🔗 ${ph.link.replace('https://','')}</a></li>`;
+      html+=`</ul></div>`;
+    }
+  }
+  document.getElementById('panel-metodichka').innerHTML=html;
+}
+
+// ══════════════════════════════════════════════
+// ПРИВЫЧКИ
+// ══════════════════════════════════════════════
+const HABS=['piano','flute','mix','review'];
+const HLBL={piano:'🎹 Форте',flute:'🎵 Флейта',mix:'🎚 Микс',review:'📝 Ревью'};
+
+function wkStart(off){
+  const n=alm(),dow=n.getDay(),dm=dow===0?-6:1-dow,m=new Date(n);
+  m.setDate(n.getDate()+dm+off*7);m.setHours(0,0,0,0);return m;
+}
+
+function renderHabits(){
+  const ws=wkStart(habOff),we=new Date(ws);we.setDate(ws.getDate()+6);
+  const todayK=dk(alm()),wlbl=`${ws.getDate()} ${MG[ws.getMonth()]} — ${we.getDate()} ${MG[we.getMonth()]}`;
+  const days=Array.from({length:7},(_,i)=>{const d=new Date(ws);d.setDate(ws.getDate()+i);return d;});
+  let html=`<div class="hab-nav">
+    <button class="cnbtn" onclick="habOff--;renderHabits()">‹</button>
+    <span class="hab-wlbl">${wlbl}</span>
+    <button class="cnbtn" onclick="habOff++;renderHabits()">›</button>
+  </div><div class="hab-grid">
+    <div class="hab-hdr"><div></div>${days.map(d=>`<div>${DS[d.getDay()]}<br>${d.getDate()}</div>`).join('')}</div>`;
+  for(const h of HABS){
+    html+=`<div class="hab-row"><div class="hab-name">${HLBL[h]}</div>`;
+    days.forEach(d=>{
+      const key=dk(d),done=hDone(key,h),isT=key===todayK;
+      html+=`<div class="hab-cell${done?' done':''}${isT?' tday':''}" onclick="toggleHCell('${key}','${h}')"><div class="hdot"></div></div>`;
+    });
+    html+=`</div>`;
+  }
+  html+=`</div>`;
+  document.getElementById('panel-habits').innerHTML=html;
+}
+function toggleHCell(key,h){toggleH(key,h);renderHabits();if(curTab==='stats')renderStats();}
+
+// ══════════════════════════════════════════════
+// СТАТИСТИКА
+// ══════════════════════════════════════════════
+function renderStats(){
+  const n=alm();let piano=0,flute=0,mix=0,rev=0,streak=0,total=0;
+  for(let i=0;i<365;i++){
+    const d=new Date(n);d.setDate(n.getDate()-i);const key=dk(d);
+    const hp=hDone(key,'piano'),hf=hDone(key,'flute'),hm=hDone(key,'mix'),hr=hDone(key,'review');
+    if(hp)piano++;if(hf)flute++;if(hm)mix++;if(hr)rev++;
+    const any=hp||hm||hr;
+    if(any){total++;if(i===0||streak>0)streak++;}
+    else if(i>0) break;
+  }
+  let ptot=0,pdone=0;
+  for(const s of CURR)for(const ph of s.phases){ptot++;if(phComplete(ph.id))pdone++;}
+  const modeLabel=syncMode==='firebase'?'🔥 Firebase':'💾 Локально';
+  document.getElementById('panel-stats').innerHTML=`
+    <div class="sec-lbl">Активность</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-v">${streak}</div><div class="stat-l">🔥 Дней подряд</div></div>
+      <div class="stat-card"><div class="stat-v">${total}</div><div class="stat-l">📅 Дней всего</div></div>
+    </div>
+    <div class="sec-lbl">Сессии</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-v">${piano}</div><div class="stat-l">🎹 Фортепиано</div></div>
+      <div class="stat-card"><div class="stat-v">${flute}</div><div class="stat-l">🎵 Флейта</div></div>
+      <div class="stat-card"><div class="stat-v">${mix}</div><div class="stat-l">🎚 Микс</div></div>
+      <div class="stat-card"><div class="stat-v">${rev}</div><div class="stat-l">📝 Ревью</div></div>
+    </div>
+    <div class="sec-lbl">Методичка</div>
+    <div class="stat-grid">
+      <div class="stat-card" style="grid-column:span 2">
+        <div class="stat-v">${pdone}<span style="font-size:20px;color:var(--sub)"> / ${ptot}</span></div>
+        <div class="stat-l">📚 Фаз пройдено</div>
+      </div>
+    </div>
+    <div class="sec-lbl">Синхронизация</div>
+    <div class="stat-grid">
+      <div class="stat-card" style="grid-column:span 2">
+        <div style="font-size:15px;font-weight:600">${modeLabel}</div>
+        <div class="stat-l">${syncMode==='firebase'?'Данные в Firebase — синхронизация на всех устройствах':'Оффлайн — данные только на этом устройстве'}</div>
+      </div>
+    </div>
+    <button class="reset-btn" onclick="resetAll()">🗑 Сбросить все данные</button>`;
+}
+
+async function resetAll(){
+  if(!confirm('Сбросить ВСЕ данные?')) return;
+  DB.habits={};DB.meta={};DB.sched={};
+  await Promise.all([fbWrite('habits',{}),fbWrite('meta',{}),fbWrite('sched',{})]);
+  lsWrite(LS.habits,{});lsWrite(LS.meta,{});lsWrite(LS.sched,{});
+  renderAll();
+}
+
+// ══════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════
+function showTab(t){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.tbn').forEach(b=>b.classList.remove('on'));
+  document.getElementById('panel-'+t).classList.add('on');
+  document.getElementById('tb-'+t).classList.add('on');
+  curTab=t;
+  if(t==='today')       renderDay('today',alm());
+  else if(t==='tomorrow')    renderDay('tomorrow',tom());
+  else if(t==='calendar')    renderCal();
+  else if(t==='metodichka')  renderMeta();
+  else if(t==='habits')      renderHabits();
+  else if(t==='stats')       renderStats();
+}
+
+function renderAll(){
+  renderDay('today',alm());renderDay('tomorrow',tom());
+  const n=alm();calY=n.getFullYear();calM=n.getMonth();
+  renderCal();renderMeta();renderHabits();renderStats();
+}
+
+function setModePill(mode){
+  const pill=document.getElementById('mode-pill');
+  if(mode==='firebase'){pill.textContent='🔥 Firebase';pill.className='mode-pill notion';}
+  else{pill.textContent='💾 Локально';pill.className='mode-pill local';}
+}
+
+// ══════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════
+async function init(){
+  const setMsg=m=>document.getElementById('load-msg').textContent=m;
+
+  setMsg('Firebase: загружаем данные...');
+  // Читаем из Firebase (с fallback на localStorage если нет сети)
+  try{
+    const[habits,meta,sched]=await Promise.all([fbRead('habits'),fbRead('meta'),fbRead('sched')]);
+    Object.assign(DB.habits,habits);
+    Object.assign(DB.meta,meta);
+    Object.assign(DB.sched,sched);
+    syncMode='firebase';
+    setModePill('firebase');
+  }catch{
+    // Оффлайн — берём из localStorage
+    Object.assign(DB.habits,lsRead(LS.habits));
+    Object.assign(DB.meta,lsRead(LS.meta));
+    Object.assign(DB.sched,lsRead(LS.sched));
+    syncMode='local';
+    setModePill('local');
+  }
+
+  loadManualEvents();
+
+  document.getElementById('loading').style.display='none';
+  document.getElementById('root').style.display='block';
+  renderAll();
+}
+
+init();
+</script>
+</body>
+</html>
