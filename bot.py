@@ -13,37 +13,18 @@ logger = logging.getLogger(__name__)
 TZ = ZoneInfo("Asia/Almaty")
 TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "560819891")
-MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://mark:Salam123@markebulanschedulebot.yyu6gaf.mongodb.net/?appName=MarkebulanScheduleBot")
-
-from pymongo import MongoClient
-
-_client = None
-_col = None
-
-def get_col():
-    global _client, _col
-    if _col is None:
-        _client = MongoClient(MONGO_URL)
-        _col = _client["markbot"]["data"]
-    return _col
+DATA_FILE = "data.json"
 
 def load():
     try:
-        col = get_col()
-        doc = col.find_one({"_id": "main"})
-        if doc:
-            doc.pop("_id", None)
-            return doc
-    except Exception as e:
-        logger.error(f"MongoDB load error: {e}")
-    return {"days":{}, "cal":{}, "prog":{}, "hab":{}, "finance":[], "notes":[], "tabex_start":None, "tabex_taken":{}}
+        with open(DATA_FILE) as f:
+            return json.load(f)
+    except:
+        return {"days":{}, "cal":{}, "prog":{}, "hab":{}, "finance":[], "notes":[], "tabex_start":None, "tabex_taken":{}}
 
 def save(data):
-    try:
-        col = get_col()
-        col.replace_one({"_id": "main"}, {"_id": "main", **data}, upsert=True)
-    except Exception as e:
-        logger.error(f"MongoDB save error: {e}")
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def now_a(): return datetime.now(TZ)
 def today_key(): return now_a().strftime("%Y-%m-%d")
