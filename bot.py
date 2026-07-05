@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 TZ = ZoneInfo("Asia/Almaty")
 TOKEN = os.environ.get("BOT_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "560819891")
+CHAT_ID = os.environ.get("CHAT_ID", "")
 DATA_FILE = "data.json"
 
 def load():
@@ -848,33 +848,21 @@ async def reminder(ctx):
     try: await ctx.bot.send_message(chat_id=ctx.job.data["cid"],text=ctx.job.data["msg"],parse_mode="Markdown")
     except Exception as e: logger.error(e)
 
-async def check_event_reminders(ctx):
-    cid = ctx.job.data["cid"]
-    data = load()
-    now = now_a()
-    ds = now.strftime("%Y-%m-%d")
-    evts = data.get("cal",{}).get(ds,[])
-    current_min = now.hour*60+now.minute
-    for e in evts:
-        if e.get("t_from") and tmin(e["t_from"])-current_min == 15:
-            try:
-                await ctx.bot.send_message(cid, f"⏰ Через 15 мин: *{e['text']}* в {e['t_from']}", parse_mode="Markdown")
-            except Exception as ex: logger.error(ex)
-
 def setup_reminders(app, cid):
     jq=app.job_queue
     for t_str,msg_text in [
         ("07:25","⏰ *Подъём через 5 минут!*"),
-        ("07:30","🌅 *Подъём!*\nВода, умыться, без телефона 20 мин."),
-        ("07:50","🍳 *Завтрак + сборы*"),
-        ("13:20","🍽 *Обед* — 45 мин, выйди подышать"),
-        ("19:00","🔴 *Ревью дня*\n\nЧто сделал:\n\nЧто получилось:\n\nЧто было сложно:\n\nЗавтра:"),
-        ("21:00","🌙 *Подготовка ко сну*\nУбери телефон. Приглуши свет."),
-        ("22:00","😴 *Отбой!* Спокойной ночи."),
+        ("07:30","🌅 *Подъём!* Вода, умыться, без телефона 20 мин."),
+        ("09:30","🟣 *Сольфеджио* — 30 мин"),
+        ("10:10","🔵 *Фортепиано* — 45 мин, гаммы и этюд"),
+        ("11:05","🔵 *Флейта* — 30 мин, долгие ноты"),
+        ("11:45","🟣 *Ear Training* — 20 мин"),
+        ("12:50","🔵 *Микс / Pro Tools* — 2 часа"),
+        ("19:00","🔴 *Ревью дня!*\n\nЧто сделал:\n\nЧто получилось:\n\nЧто было сложно:\n\nЗавтра:"),
+        ("20:55","🌙 *Готовься ко сну*\nУбери телефон. Приглуши свет."),
     ]:
         h,m=map(int,t_str.split(":"))
         jq.run_daily(reminder,time=dtime(hour=h,minute=m,tzinfo=TZ),data={"cid":cid,"msg":msg_text})
-    jq.run_repeating(check_event_reminders,interval=60,first=10,data={"cid":cid})
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
