@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 TZ = ZoneInfo("Asia/Almaty")
 TOKEN = os.environ.get("BOT_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "560819891")
+CHAT_ID = os.environ.get("CHAT_ID", "")
 DATA_FILE = "data.json"
 
 def load():
@@ -49,25 +49,23 @@ def mtime(m): return f"{m//60:02d}:{m%60:02d}"
 # P4 = заполнители (перерывы, свободное время — удаляются если нет места)
 
 DEFAULT = [
-    {"id":"wake",  "t":"07:30","n":"Подъём",              "d":"Без телефона — вода, умыться, выглянуть в окно","dur":20, "p":1},
-    {"id":"bfast", "t":"07:50","n":"Завтрак + сборы",     "d":"40 мин","dur":40, "p":2},
-    {"id":"go",    "t":"08:30","n":"Выезд",               "d":"До часа пик","dur":30, "p":1},
-    {"id":"solf",  "t":"09:00","n":"Сольфеджио",          "d":"60 мин — ноты, ритм, интервалы","dur":60, "p":3},
-    {"id":"ear",   "t":"10:00","n":"Ear Training",        "d":"30 мин","dur":30, "p":3},
-    {"id":"b1",    "t":"10:30","n":"Перерыв",             "d":"10 мин — встать, вода","dur":10, "p":4},
-    {"id":"piano", "t":"10:40","n":"Фортепиано",          "d":"60 мин — гаммы, этюд","dur":60, "p":3},
-    {"id":"flute", "t":"10:40","n":"Флейта",              "d":"60 мин — долгие ноты, гаммы, этюд","dur":60, "p":3},
-    {"id":"b2",    "t":"11:40","n":"Перерыв",             "d":"10 мин","dur":10, "p":4},
-    {"id":"pt",    "t":"11:50","n":"Pro Tools",           "d":"90 мин — по курсу Udemy","dur":90, "p":3},
-    {"id":"lunch", "t":"13:20","n":"Обед + пауза",        "d":"45 мин — выйти подышать","dur":45, "p":2},
-    {"id":"prac",  "t":"14:05","n":"Практика",            "d":"2 ч — применение изученного","dur":120, "p":3},
-    {"id":"b3",    "t":"16:05","n":"Перерыв",             "d":"15 мин","dur":15, "p":4},
-    {"id":"read",  "t":"16:20","n":"Чтение / теория",     "d":"60 мин — книги, статьи, документация","dur":60, "p":3},
-    {"id":"sport", "t":"17:20","n":"Прогулка / спорт",    "d":"45 мин","dur":45, "p":2},
-    {"id":"free",  "t":"18:05","n":"Свободное время",     "d":"Личные дела, отдых","dur":55, "p":4},
-    {"id":"rev",   "t":"19:00","n":"Ревью дня",           "d":"5 мин — записать в заметки","dur":10, "p":2},
-    {"id":"wind",  "t":"21:00","n":"Подготовка ко сну",   "d":"Убрать телефон, приглушить свет","dur":60, "p":2},
-    {"id":"slp",   "t":"22:00","n":"Отбой",               "d":"Цель — до 22:00","dur":0, "p":1},
+    {"id":"wake",  "t":"07:30","n":"Подъём",           "d":"Без телефона — вода, умыться, выглянуть в окно","dur":20, "p":1},
+    {"id":"bfast", "t":"07:50","n":"Завтрак + сборы",  "d":"40 мин","dur":40, "p":2},
+    {"id":"go",    "t":"08:30","n":"Выезд в офис",     "d":"До часа пик","dur":60, "p":1},
+    {"id":"solf",  "t":"09:30","n":"Сольфеджио",       "d":"20–30 мин","dur":30, "p":3},
+    {"id":"b1",    "t":"10:00","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
+    {"id":"piano", "t":"10:10","n":"Фортепиано",       "d":"45 мин — гаммы, этюд","dur":45, "p":3},
+    {"id":"b2",    "t":"10:55","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
+    {"id":"flute", "t":"11:05","n":"Флейта",           "d":"30 мин — долгие ноты, гаммы","dur":30, "p":3},
+    {"id":"b3",    "t":"11:35","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
+    {"id":"ear",   "t":"11:45","n":"Ear Training",     "d":"20 мин","dur":20, "p":3},
+    {"id":"lunch", "t":"12:05","n":"Обед + пауза",     "d":"45 мин — выйти из офиса","dur":45, "p":2},
+    {"id":"mix",   "t":"12:50","n":"Микс / Pro Tools", "d":"2 ч","dur":120, "p":3},
+    {"id":"work",  "t":"14:50","n":"Работа / прокат",  "d":"до вечера","dur":150, "p":1},
+    {"id":"free",  "t":"17:20","n":"Свободное время",  "d":"Отдых","dur":100, "p":4},
+    {"id":"rev",   "t":"19:00","n":"Ревью дня",        "d":"5 мин — записать в заметки","dur":10, "p":2},
+    {"id":"wind",  "t":"21:00","n":"Подготовка ко сну","d":"Убрать телефон, приглушить свет","dur":60, "p":2},
+    {"id":"slp",   "t":"22:00","n":"Отбой",            "d":"Цель — до 22:00","dur":0, "p":1},
 ]
 
 LATEST_ALLOWED = {
@@ -78,31 +76,7 @@ LATEST_ALLOWED = {
 }
 
 def build_schedule(date_str, data):
-    dow = datetime.strptime(date_str, "%Y-%m-%d").weekday()  # 0=пн, 6=вс
-
-    # Воскресенье — отдых
-    if dow == 6:
-        base = [b.copy() for b in DEFAULT if b["id"] in ("wake","bfast","go","lunch","sport","free","rev","wind","slp")]
-        for b in base:
-            if b["id"] == "free": b["d"] = "Полный отдых 🌿"; b["dur"] = 170
-        evts = data.get("cal",{}).get(date_str,[])
-        return sorted(base, key=lambda x: tmin(x["t"]))
-
-    # Суббота — только PT + Ear Training
-    if dow == 5:
-        skip = {"piano","flute","solf","b1"}
-        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
-
-    # Вт/Чт — Сольфеджио + Флейта + Ear Training + PT
-    elif dow in (1, 3):
-        skip = {"piano"}
-        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
-
-    # Пн/Ср/Пт — Сольфеджио + Фортепиано + Ear Training + PT
-    else:
-        skip = {"flute"}
-        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
-
+    base = [b.copy() for b in DEFAULT]
     evts = data.get("cal",{}).get(date_str,[])
 
     # Собираем фиксированные события (P1) из cal
@@ -438,9 +412,7 @@ def render_day(ds, data, pg=0):
     pct = round(done/len(blocks)*100) if blocks else 0
     bar = "█"*(pct//10)+"░"*(10-pct//10)
 
-    dow = datetime.strptime(ds, "%Y-%m-%d").weekday()
-    rot = ["Пн: Сольф+Форте+Слух+PT","Вт: Сольф+Флейта+Слух+PT","Ср: Сольф+Форте+Слух+PT","Чт: Сольф+Флейта+Слух+PT","Пт: Сольф+Форте+Слух+PT","Сб: PT+Слух","Вс: Отдых 🌿"][dow]
-    lines = [f"*{day_label(ds)}*", f"_{rot}_"]
+    lines = [f"*{day_label(ds)}*"]
     for e in evts:
         icon = {"busy":"📌","personal":"👤","orch":"🎼","live":"🎤"}.get(e.get("type"),"•")
         tr = f" {e['t_from']}–{e['t_to']}" if e.get("t_from") else ""
@@ -848,33 +820,21 @@ async def reminder(ctx):
     try: await ctx.bot.send_message(chat_id=ctx.job.data["cid"],text=ctx.job.data["msg"],parse_mode="Markdown")
     except Exception as e: logger.error(e)
 
-async def check_event_reminders(ctx):
-    cid = ctx.job.data["cid"]
-    data = load()
-    now = now_a()
-    ds = now.strftime("%Y-%m-%d")
-    evts = data.get("cal",{}).get(ds,[])
-    current_min = now.hour*60+now.minute
-    for e in evts:
-        if e.get("t_from") and tmin(e["t_from"])-current_min == 15:
-            try:
-                await ctx.bot.send_message(cid, f"⏰ Через 15 мин: *{e['text']}* в {e['t_from']}", parse_mode="Markdown")
-            except Exception as ex: logger.error(ex)
-
 def setup_reminders(app, cid):
     jq=app.job_queue
     for t_str,msg_text in [
         ("07:25","⏰ *Подъём через 5 минут!*"),
-        ("07:30","🌅 *Подъём!*\nВода, умыться, без телефона 20 мин."),
-        ("07:50","🍳 *Завтрак + сборы*"),
-        ("13:20","🍽 *Обед* — 45 мин, выйди подышать"),
-        ("19:00","🔴 *Ревью дня*\n\nЧто сделал:\n\nЧто получилось:\n\nЧто было сложно:\n\nЗавтра:"),
-        ("21:00","🌙 *Подготовка ко сну*\nУбери телефон. Приглуши свет."),
-        ("22:00","😴 *Отбой!* Спокойной ночи."),
+        ("07:30","🌅 *Подъём!* Вода, умыться, без телефона 20 мин."),
+        ("09:30","🟣 *Сольфеджио* — 30 мин"),
+        ("10:10","🔵 *Фортепиано* — 45 мин, гаммы и этюд"),
+        ("11:05","🔵 *Флейта* — 30 мин, долгие ноты"),
+        ("11:45","🟣 *Ear Training* — 20 мин"),
+        ("12:50","🔵 *Микс / Pro Tools* — 2 часа"),
+        ("19:00","🔴 *Ревью дня!*\n\nЧто сделал:\n\nЧто получилось:\n\nЧто было сложно:\n\nЗавтра:"),
+        ("20:55","🌙 *Готовься ко сну*\nУбери телефон. Приглуши свет."),
     ]:
         h,m=map(int,t_str.split(":"))
         jq.run_daily(reminder,time=dtime(hour=h,minute=m,tzinfo=TZ),data={"cid":cid,"msg":msg_text})
-    jq.run_repeating(check_event_reminders,interval=60,first=10,data={"cid":cid})
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
