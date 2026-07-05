@@ -76,7 +76,31 @@ LATEST_ALLOWED = {
 }
 
 def build_schedule(date_str, data):
-    base = [b.copy() for b in DEFAULT]
+    dow = datetime.strptime(date_str, "%Y-%m-%d").weekday()  # 0=пн, 6=вс
+
+    # Воскресенье — отдых
+    if dow == 6:
+        base = [b.copy() for b in DEFAULT if b["id"] in ("wake","bfast","go","lunch","free","rev","wind","slp")]
+        for b in base:
+            if b["id"] == "free": b["d"] = "Полный отдых 🌿"
+        evts = data.get("cal",{}).get(date_str,[])
+        return sorted(base, key=lambda x: tmin(x["t"]))
+
+    # Суббота — только PT + Ear Training
+    if dow == 5:
+        skip = {"piano","flute","solf","b1","b2","b3"}
+        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
+
+    # Вт/Чт — Сольфеджио + Флейта + Ear Training + PT
+    elif dow in (1, 3):
+        skip = {"piano","b2"}
+        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
+
+    # Пн/Ср/Пт — Сольфеджио + Фортепиано + Ear Training + PT
+    else:
+        skip = {"flute","b3"}
+        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
+
     evts = data.get("cal",{}).get(date_str,[])
 
     # Собираем фиксированные события (P1) из cal
@@ -412,7 +436,9 @@ def render_day(ds, data, pg=0):
     pct = round(done/len(blocks)*100) if blocks else 0
     bar = "█"*(pct//10)+"░"*(10-pct//10)
 
-    lines = [f"*{day_label(ds)}*"]
+    dow = datetime.strptime(ds, "%Y-%m-%d").weekday()
+    rot = ["Пн: Сольф+Форте+Слух+PT","Вт: Сольф+Флейта+Слух+PT","Ср: Сольф+Форте+Слух+PT","Чт: Сольф+Флейта+Слух+PT","Пт: Сольф+Форте+Слух+PT","Сб: PT+Слух","Вс: Отдых 🌿"][dow]
+    lines = [f"*{day_label(ds)}*", f"_{rot}_"]
     for e in evts:
         icon = {"busy":"📌","personal":"👤","orch":"🎼","live":"🎤"}.get(e.get("type"),"•")
         tr = f" {e['t_from']}–{e['t_to']}" if e.get("t_from") else ""
