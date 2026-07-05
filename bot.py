@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 TZ = ZoneInfo("Asia/Almaty")
 TOKEN = os.environ.get("BOT_TOKEN", "")
-CHAT_ID = os.environ.get("CHAT_ID", "")
+CHAT_ID = os.environ.get("CHAT_ID", "560819891")
 DATA_FILE = "data.json"
 
 def load():
@@ -49,23 +49,25 @@ def mtime(m): return f"{m//60:02d}:{m%60:02d}"
 # P4 = заполнители (перерывы, свободное время — удаляются если нет места)
 
 DEFAULT = [
-    {"id":"wake",  "t":"07:30","n":"Подъём",           "d":"Без телефона — вода, умыться, выглянуть в окно","dur":20, "p":1},
-    {"id":"bfast", "t":"07:50","n":"Завтрак + сборы",  "d":"40 мин","dur":40, "p":2},
-    {"id":"go",    "t":"08:30","n":"Выезд в офис",     "d":"До часа пик","dur":60, "p":1},
-    {"id":"solf",  "t":"09:30","n":"Сольфеджио",       "d":"20–30 мин","dur":30, "p":3},
-    {"id":"b1",    "t":"10:00","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
-    {"id":"piano", "t":"10:10","n":"Фортепиано",       "d":"45 мин — гаммы, этюд","dur":45, "p":3},
-    {"id":"b2",    "t":"10:55","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
-    {"id":"flute", "t":"11:05","n":"Флейта",           "d":"30 мин — долгие ноты, гаммы","dur":30, "p":3},
-    {"id":"b3",    "t":"11:35","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
-    {"id":"ear",   "t":"11:45","n":"Ear Training",     "d":"20 мин","dur":20, "p":3},
-    {"id":"lunch", "t":"12:05","n":"Обед + пауза",     "d":"45 мин — выйти из офиса","dur":45, "p":2},
-    {"id":"mix",   "t":"12:50","n":"Микс / Pro Tools", "d":"2 ч","dur":120, "p":3},
-    {"id":"work",  "t":"14:50","n":"Работа / прокат",  "d":"до вечера","dur":150, "p":1},
-    {"id":"free",  "t":"17:20","n":"Свободное время",  "d":"Отдых","dur":100, "p":4},
-    {"id":"rev",   "t":"19:00","n":"Ревью дня",        "d":"5 мин — записать в заметки","dur":10, "p":2},
-    {"id":"wind",  "t":"21:00","n":"Подготовка ко сну","d":"Убрать телефон, приглушить свет","dur":60, "p":2},
-    {"id":"slp",   "t":"22:00","n":"Отбой",            "d":"Цель — до 22:00","dur":0, "p":1},
+    {"id":"wake",  "t":"07:30","n":"Подъём",              "d":"Без телефона — вода, умыться, выглянуть в окно","dur":20, "p":1},
+    {"id":"bfast", "t":"07:50","n":"Завтрак + сборы",     "d":"40 мин","dur":40, "p":2},
+    {"id":"go",    "t":"08:30","n":"Выезд",               "d":"До часа пик","dur":30, "p":1},
+    {"id":"solf",  "t":"09:00","n":"Сольфеджио",          "d":"60 мин — ноты, ритм, интервалы","dur":60, "p":3},
+    {"id":"ear",   "t":"10:00","n":"Ear Training",        "d":"30 мин","dur":30, "p":3},
+    {"id":"b1",    "t":"10:30","n":"Перерыв",             "d":"10 мин — встать, вода","dur":10, "p":4},
+    {"id":"piano", "t":"10:40","n":"Фортепиано",          "d":"60 мин — гаммы, этюд","dur":60, "p":3},
+    {"id":"flute", "t":"10:40","n":"Флейта",              "d":"60 мин — долгие ноты, гаммы, этюд","dur":60, "p":3},
+    {"id":"b2",    "t":"11:40","n":"Перерыв",             "d":"10 мин","dur":10, "p":4},
+    {"id":"pt",    "t":"11:50","n":"Pro Tools",           "d":"90 мин — по курсу Udemy","dur":90, "p":3},
+    {"id":"lunch", "t":"13:20","n":"Обед + пауза",        "d":"45 мин — выйти подышать","dur":45, "p":2},
+    {"id":"prac",  "t":"14:05","n":"Практика",            "d":"2 ч — применение изученного","dur":120, "p":3},
+    {"id":"b3",    "t":"16:05","n":"Перерыв",             "d":"15 мин","dur":15, "p":4},
+    {"id":"read",  "t":"16:20","n":"Чтение / теория",     "d":"60 мин — книги, статьи, документация","dur":60, "p":3},
+    {"id":"sport", "t":"17:20","n":"Прогулка / спорт",    "d":"45 мин","dur":45, "p":2},
+    {"id":"free",  "t":"18:05","n":"Свободное время",     "d":"Личные дела, отдых","dur":55, "p":4},
+    {"id":"rev",   "t":"19:00","n":"Ревью дня",           "d":"5 мин — записать в заметки","dur":10, "p":2},
+    {"id":"wind",  "t":"21:00","n":"Подготовка ко сну",   "d":"Убрать телефон, приглушить свет","dur":60, "p":2},
+    {"id":"slp",   "t":"22:00","n":"Отбой",               "d":"Цель — до 22:00","dur":0, "p":1},
 ]
 
 LATEST_ALLOWED = {
@@ -76,7 +78,31 @@ LATEST_ALLOWED = {
 }
 
 def build_schedule(date_str, data):
-    base = [b.copy() for b in DEFAULT]
+    dow = datetime.strptime(date_str, "%Y-%m-%d").weekday()  # 0=пн, 6=вс
+
+    # Воскресенье — отдых
+    if dow == 6:
+        base = [b.copy() for b in DEFAULT if b["id"] in ("wake","bfast","go","lunch","sport","free","rev","wind","slp")]
+        for b in base:
+            if b["id"] == "free": b["d"] = "Полный отдых 🌿"; b["dur"] = 170
+        evts = data.get("cal",{}).get(date_str,[])
+        return sorted(base, key=lambda x: tmin(x["t"]))
+
+    # Суббота — только PT + Ear Training
+    if dow == 5:
+        skip = {"piano","flute","solf","b1"}
+        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
+
+    # Вт/Чт — Сольфеджио + Флейта + Ear Training + PT
+    elif dow in (1, 3):
+        skip = {"piano"}
+        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
+
+    # Пн/Ср/Пт — Сольфеджио + Фортепиано + Ear Training + PT
+    else:
+        skip = {"flute"}
+        base = [b.copy() for b in DEFAULT if b["id"] not in skip]
+
     evts = data.get("cal",{}).get(date_str,[])
 
     # Собираем фиксированные события (P1) из cal
@@ -400,6 +426,7 @@ def main_kb():
         [InlineKeyboardButton("✏️ Редактор", callback_data="editor"),
          InlineKeyboardButton("📋 Памятка", callback_data="guide")],
         [InlineKeyboardButton("😴 Сон и фокус", callback_data="sleep_tips")],
+        [InlineKeyboardButton("🚭 Бросаю курить (Табекс)", callback_data="tabex_menu")],
     ])
 
 # ─── DAY VIEW ────────────────────────────────────────────────────────────────
@@ -412,7 +439,9 @@ def render_day(ds, data, pg=0):
     pct = round(done/len(blocks)*100) if blocks else 0
     bar = "█"*(pct//10)+"░"*(10-pct//10)
 
-    lines = [f"*{day_label(ds)}*"]
+    dow = datetime.strptime(ds, "%Y-%m-%d").weekday()
+    rot = ["Пн: Сольф+Форте+Слух+PT","Вт: Сольф+Флейта+Слух+PT","Ср: Сольф+Форте+Слух+PT","Чт: Сольф+Флейта+Слух+PT","Пт: Сольф+Форте+Слух+PT","Сб: PT+Слух","Вс: Отдых 🌿"][dow]
+    lines = [f"*{day_label(ds)}*", f"_{rot}_"]
     for e in evts:
         icon = {"busy":"📌","personal":"👤","orch":"🎼","live":"🎤"}.get(e.get("type"),"•")
         tr = f" {e['t_from']}–{e['t_to']}" if e.get("t_from") else ""
@@ -650,7 +679,104 @@ def render_edit_block(bid):
     ])
     return text, kb
 
-# ─── HANDLERS ────────────────────────────────────────────────────────────────
+# ─── TABEX ───────────────────────────────────────────────────────────────────
+
+TABEX_SCHEME = {
+    # день: [список времён приёма]
+    1:  ["08:00","10:00","12:00","14:00","16:00","18:00","20:00","22:00"],
+    2:  ["08:00","10:00","12:00","14:00","16:00","18:00","20:00","22:00"],
+    3:  ["08:00","10:00","12:00","14:00","16:00","18:00","20:00","22:00"],
+    4:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    5:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    6:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    7:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    8:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    9:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    10: ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    11: ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    12: ["08:00","10:30","13:00","15:30","18:00","20:30"],
+    13: ["08:00","11:00","14:00","17:00","20:00"],
+    14: ["08:00","11:00","14:00","17:00","20:00"],
+    15: ["08:00","11:00","14:00","17:00","20:00"],
+    16: ["08:00","11:00","14:00","17:00","20:00"],
+    17: ["08:00","13:00","20:00"],
+    18: ["08:00","13:00","20:00"],
+    19: ["08:00","13:00","20:00"],
+    20: ["08:00","13:00","20:00"],
+    21: ["08:00","20:00"],
+    22: ["08:00","20:00"],
+    23: ["08:00","20:00"],
+    24: ["08:00","20:00"],
+    25: ["08:00","20:00"],
+}
+
+def tabex_day_num(data):
+    start = data.get("tabex_start")
+    if not start: return None
+    start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=TZ)
+    today_dt = datetime.strptime(today_key(), "%Y-%m-%d").replace(tzinfo=TZ)
+    return (today_dt - start_dt).days + 1
+
+def render_tabex_menu(data):
+    day_num = tabex_day_num(data)
+    if not day_num or day_num > 25:
+        text = ("*🚭 Бросаю курить — Табекс*\n\n"
+                "Табекс принимается 25 дней по схеме производителя.\n"
+                "Я добавлю уведомления автоматически по расписанию.\n\n"
+                "⚠️ Важно: после 5-го дня нужно полностью бросить курить.\n\n"
+                "Когда начинаешь?")
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Начинаю сегодня", callback_data="tabex_start_today")],
+            [InlineKeyboardButton("← Меню", callback_data="menu")],
+        ])
+    else:
+        scheme = TABEX_SCHEME.get(day_num, [])
+        start = data.get("tabex_start","")
+        now = now_a()
+        current_min = now.hour*60+now.minute
+        taken = data.get("tabex_taken",{}).get(today_key(),[])
+        done = len(taken)
+        text = (f"*🚭 Табекс — День {day_num}/25*\n"
+                f"Начало: {start}\n\n"
+                f"Таблеток сегодня: {done}/{len(scheme)}\n\n"
+                "*Расписание приёмов:*\n")
+        for t in scheme:
+            mark = "✅" if t in taken else ("⏰" if tmin(t) <= current_min else "⬜")
+            text += f"{mark} {t}\n"
+
+        if day_num == 5:
+            text += "\n⚠️ *С сегодняшнего дня — полный отказ от сигарет!*"
+
+        days_left = 25 - day_num
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Принял таблетку", callback_data="tabex_took")],
+            [InlineKeyboardButton(f"📊 Прогресс: осталось {days_left} дн.", callback_data="noop")],
+            [InlineKeyboardButton("🔄 Сбросить курс", callback_data="tabex_reset")],
+            [InlineKeyboardButton("← Меню", callback_data="menu")],
+        ])
+    return text, kb
+
+async def setup_tabex_reminders(app, cid, data):
+    """Устанавливает напоминания Табекса на сегодня"""
+    jq = app.job_queue
+    day_num = tabex_day_num(data)
+    if not day_num or day_num > 25: return
+    scheme = TABEX_SCHEME.get(day_num, [])
+    taken = data.get("tabex_taken",{}).get(today_key(),[])
+    now = now_a()
+    for t_str in scheme:
+        if t_str in taken: continue
+        h,m = map(int, t_str.split(":"))
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target > now:
+            delay = (target - now).total_seconds()
+            jq.run_once(
+                reminder,
+                when=delay,
+                data={"cid": cid, "msg": f"💊 *Табекс* — время принять таблетку ({t_str})"}
+            )
+
+
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет, Марк!\n\nВыбери раздел:", reply_markup=main_kb(), parse_mode="Markdown")
@@ -684,6 +810,34 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(GUIDE_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
     elif d=="sleep_tips":
         await q.edit_message_text(SLEEP_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
+
+    elif d=="tabex_menu":
+        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+
+    elif d=="tabex_start_today":
+        data["tabex_start"]=today_key()
+        data.setdefault("tabex_taken",{})
+        save(data)
+        await setup_tabex_reminders(ctx.application, CHAT_ID, data)
+        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+
+    elif d=="tabex_took":
+        day_num=tabex_day_num(data)
+        scheme=TABEX_SCHEME.get(day_num,[])
+        taken=data.setdefault("tabex_taken",{}).setdefault(today_key(),[])
+        now=now_a(); current_min=now.hour*60+now.minute
+        # Отмечаем ближайший непринятый приём
+        for t_str in scheme:
+            if t_str not in taken:
+                taken.append(t_str)
+                save(data)
+                break
+        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+
+    elif d=="tabex_reset":
+        data.pop("tabex_start",None); data.pop("tabex_taken",None)
+        save(data)
+        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
 
     # EDITOR
     elif d=="editor":
@@ -820,21 +974,33 @@ async def reminder(ctx):
     try: await ctx.bot.send_message(chat_id=ctx.job.data["cid"],text=ctx.job.data["msg"],parse_mode="Markdown")
     except Exception as e: logger.error(e)
 
+async def check_event_reminders(ctx):
+    cid = ctx.job.data["cid"]
+    data = load()
+    now = now_a()
+    ds = now.strftime("%Y-%m-%d")
+    evts = data.get("cal",{}).get(ds,[])
+    current_min = now.hour*60+now.minute
+    for e in evts:
+        if e.get("t_from") and tmin(e["t_from"])-current_min == 15:
+            try:
+                await ctx.bot.send_message(cid, f"⏰ Через 15 мин: *{e['text']}* в {e['t_from']}", parse_mode="Markdown")
+            except Exception as ex: logger.error(ex)
+
 def setup_reminders(app, cid):
     jq=app.job_queue
     for t_str,msg_text in [
         ("07:25","⏰ *Подъём через 5 минут!*"),
-        ("07:30","🌅 *Подъём!* Вода, умыться, без телефона 20 мин."),
-        ("09:30","🟣 *Сольфеджио* — 30 мин"),
-        ("10:10","🔵 *Фортепиано* — 45 мин, гаммы и этюд"),
-        ("11:05","🔵 *Флейта* — 30 мин, долгие ноты"),
-        ("11:45","🟣 *Ear Training* — 20 мин"),
-        ("12:50","🔵 *Микс / Pro Tools* — 2 часа"),
-        ("19:00","🔴 *Ревью дня!*\n\nЧто сделал:\n\nЧто получилось:\n\nЧто было сложно:\n\nЗавтра:"),
-        ("20:55","🌙 *Готовься ко сну*\nУбери телефон. Приглуши свет."),
+        ("07:30","🌅 *Подъём!*\nВода, умыться, без телефона 20 мин."),
+        ("07:50","🍳 *Завтрак + сборы*"),
+        ("13:20","🍽 *Обед* — 45 мин, выйди подышать"),
+        ("19:00","🔴 *Ревью дня*\n\nЧто сделал:\n\nЧто получилось:\n\nЧто было сложно:\n\nЗавтра:"),
+        ("21:00","🌙 *Подготовка ко сну*\nУбери телефон. Приглуши свет."),
+        ("22:00","😴 *Отбой!* Спокойной ночи."),
     ]:
         h,m=map(int,t_str.split(":"))
         jq.run_daily(reminder,time=dtime(hour=h,minute=m,tzinfo=TZ),data={"cid":cid,"msg":msg_text})
+    jq.run_repeating(check_event_reminders,interval=60,first=10,data={"cid":cid})
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
@@ -844,7 +1010,16 @@ def main():
     app.add_handler(CommandHandler("myid",myid))
     app.add_handler(CallbackQueryHandler(btn))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,msg_handler))
-    if CHAT_ID: setup_reminders(app,CHAT_ID); logger.info(f"Reminders → {CHAT_ID}")
+    if CHAT_ID:
+        setup_reminders(app,CHAT_ID)
+        # Запускаем напоминания Табекса если курс активен
+        data = load()
+        if data.get("tabex_start"):
+            import asyncio
+            async def startup_tabex(app):
+                await setup_tabex_reminders(app, CHAT_ID, load())
+            app.post_init = startup_tabex
+        logger.info(f"Reminders → {CHAT_ID}")
     logger.info("Bot started")
     app.run_polling()
 
