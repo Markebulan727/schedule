@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
-    ContextTypes, MessageHandler, filters, JobQueue
+    ContextTypes, MessageHandler, filters
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -15,872 +15,837 @@ TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "")
 DATA_FILE = "data.json"
 
-# ─── DATA ────────────────────────────────────────────────────────────────────
-
 def load():
     try:
         with open(DATA_FILE) as f:
             return json.load(f)
     except:
-        return {"days": {}, "cal": {}, "prog": {}, "hab": {}, "custom_blocks": {}}
+        return {"days":{}, "cal":{}, "prog":{}, "hab":{}}
 
 def save(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def now_almaty():
-    return datetime.now(TZ)
+def now_a(): return datetime.now(TZ)
+def today_key(): return now_a().strftime("%Y-%m-%d")
+def tomorrow_key(): return (now_a()+timedelta(days=1)).strftime("%Y-%m-%d")
 
-def today_key():
-    return now_almaty().strftime("%Y-%m-%d")
+def day_label(ds):
+    d = datetime.strptime(ds, "%Y-%m-%d")
+    N = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    M = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
+    return f"{N[d.weekday()]}, {d.day} {M[d.month-1]}"
 
-def tomorrow_key():
-    return (now_almaty() + timedelta(days=1)).strftime("%Y-%m-%d")
+def tmin(t):
+    try: h,m=t.split(":"); return int(h)*60+int(m)
+    except: return 9999
 
-def day_name(date_str):
-    d = datetime.strptime(date_str, "%Y-%m-%d")
-    names = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"]
-    months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
-    return f"{names[d.weekday()]}, {d.day} {months[d.month-1]}"
+def mtime(m): return f"{m//60:02d}:{m%60:02d}"
 
-def time_to_min(t_str):
-    try:
-        h, m = t_str.split(":")
-        return int(h) * 60 + int(m)
-    except:
-        return 9999
+# ─── PRIORITIES ──────────────────────────────────────────────────────────────
+# P1 = фиксированные (не двигаются)
+# P2 = гибкие обязательные (двигаются, не удаляются: обед, ревью, сон)
+# P3 = учёба (двигаются в свободные слоты, сокращаются)
+# P4 = заполнители (перерывы, свободное время — удаляются если нет места)
 
-def min_to_time(minutes):
-    return f"{minutes // 60:02d}:{minutes % 60:02d}"
-
-# ─── BASE SCHEDULE ───────────────────────────────────────────────────────────
-
-DEFAULT_BLOCKS = [
-    {"id": "wake",   "t": "07:30", "n": "Подъём",           "d": "Без телефона — вода, умыться, выглянуть в окно", "dur": 20},
-    {"id": "bfast",  "t": "07:50", "n": "Завтрак + сборы",  "d": "40 мин", "dur": 40},
-    {"id": "go",     "t": "08:30", "n": "Выезд в офис",     "d": "До часа пик", "dur": 60},
-    {"id": "solf",   "t": "09:30", "n": "Сольфеджио",       "d": "20–30 мин", "dur": 30},
-    {"id": "b1",     "t": "10:00", "n": "Перерыв",          "d": "10 мин", "dur": 10},
-    {"id": "piano",  "t": "10:10", "n": "Фортепиано",       "d": "45 мин — гаммы, этюд", "dur": 45},
-    {"id": "b2",     "t": "10:55", "n": "Перерыв",          "d": "10 мин", "dur": 10},
-    {"id": "flute",  "t": "11:05", "n": "Флейта",           "d": "30 мин — долгие ноты, гаммы", "dur": 30},
-    {"id": "b3",     "t": "11:35", "n": "Перерыв",          "d": "10 мин", "dur": 10},
-    {"id": "ear",    "t": "11:45", "n": "Ear Training",     "d": "20 мин", "dur": 20},
-    {"id": "lunch",  "t": "12:05", "n": "Обед + пауза",    "d": "45 мин — выйти из офиса", "dur": 45},
-    {"id": "mix",    "t": "12:50", "n": "Микс / Pro Tools", "d": "2 ч", "dur": 120},
-    {"id": "work",   "t": "14:50", "n": "Работа / прокат",  "d": "до вечера", "dur": 150},
-    {"id": "free",   "t": "17:20", "n": "Свободное время",  "d": "Отдых", "dur": 130},
-    {"id": "rev",    "t": "19:30", "n": "Ревью дня",        "d": "5 мин — записать в заметки", "dur": 10},
-    {"id": "wind",   "t": "21:00", "n": "Подготовка ко сну","d": "Убрать телефон, приглушить свет", "dur": 60},
-    {"id": "slp",    "t": "22:00", "n": "Отбой",            "d": "Цель — до 22:00", "dur": 0},
+DEFAULT = [
+    {"id":"wake",  "t":"07:30","n":"Подъём",           "d":"Без телефона — вода, умыться, выглянуть в окно","dur":20, "p":1},
+    {"id":"bfast", "t":"07:50","n":"Завтрак + сборы",  "d":"40 мин","dur":40, "p":2},
+    {"id":"go",    "t":"08:30","n":"Выезд в офис",     "d":"До часа пик","dur":60, "p":1},
+    {"id":"solf",  "t":"09:30","n":"Сольфеджио",       "d":"20–30 мин","dur":30, "p":3},
+    {"id":"b1",    "t":"10:00","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
+    {"id":"piano", "t":"10:10","n":"Фортепиано",       "d":"45 мин — гаммы, этюд","dur":45, "p":3},
+    {"id":"b2",    "t":"10:55","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
+    {"id":"flute", "t":"11:05","n":"Флейта",           "d":"30 мин — долгие ноты, гаммы","dur":30, "p":3},
+    {"id":"b3",    "t":"11:35","n":"Перерыв",          "d":"10 мин","dur":10, "p":4},
+    {"id":"ear",   "t":"11:45","n":"Ear Training",     "d":"20 мин","dur":20, "p":3},
+    {"id":"lunch", "t":"12:05","n":"Обед + пауза",     "d":"45 мин — выйти из офиса","dur":45, "p":2},
+    {"id":"mix",   "t":"12:50","n":"Микс / Pro Tools", "d":"2 ч","dur":120, "p":3},
+    {"id":"work",  "t":"14:50","n":"Работа / прокат",  "d":"до вечера","dur":150, "p":1},
+    {"id":"free",  "t":"17:20","n":"Свободное время",  "d":"Отдых","dur":100, "p":4},
+    {"id":"rev",   "t":"19:00","n":"Ревью дня",        "d":"5 мин — записать в заметки","dur":10, "p":2},
+    {"id":"wind",  "t":"21:00","n":"Подготовка ко сну","d":"Убрать телефон, приглушить свет","dur":60, "p":2},
+    {"id":"slp",   "t":"22:00","n":"Отбой",            "d":"Цель — до 22:00","dur":0, "p":1},
 ]
 
-def get_blocks(date_str, data):
-    custom = data.get("custom_blocks", {}).get(date_str)
-    if custom:
-        blocks = custom
-    else:
-        blocks = [b.copy() for b in DEFAULT_BLOCKS]
+LATEST_ALLOWED = {
+    "lunch": 14*60,   # обед не позже 14:00
+    "rev":   22*60,   # ревью не позже 22:00
+    "wind":  22*60,   # подготовка ко сну не позже 22:00
+    "slp":   23*60,   # отбой не позже 23:00
+}
 
-    evts = data.get("cal", {}).get(date_str, [])
+def build_schedule(date_str, data):
+    base = [b.copy() for b in DEFAULT]
+    evts = data.get("cal",{}).get(date_str,[])
+
+    # Собираем фиксированные события (P1) из cal
+    fixed_events = []
     for e in evts:
-        if e.get("type") in ("busy", "personal"):
-            m = re.search(r"(\d{1,2}:\d{2})", e.get("text", ""))
-            if m:
-                eid = "evt_" + re.sub(r"\W", "_", e["text"])[:15].lower()
-                name = re.sub(r"\s*\d{1,2}:\d{2}", "", e["text"]).strip() or e["text"]
-                if not any(b["id"] == eid for b in blocks):
-                    new_blk = {"id": eid, "t": m.group(1), "n": name, "d": "", "dur": 60}
-                    blocks = insert_and_shift(blocks, new_blk)
+        if e.get("t_from") and e.get("t_to"):
+            fixed_events.append({
+                "id": "evt_"+re.sub(r"\W","_",e["text"])[:12].lower(),
+                "t": e["t_from"],
+                "n": e["text"],
+                "d": f"до {e['t_to']}",
+                "dur": tmin(e["t_to"]) - tmin(e["t_from"]),
+                "p": 1,
+                "t_end": tmin(e["t_to"]),
+                "_evt": True
+            })
 
-    return sorted(blocks, key=lambda b: time_to_min(b["t"]))
+    # Для каждого фиксированного события применяем логику сдвига
+    for fe in fixed_events:
+        fe_start = tmin(fe["t"])
+        fe_end = fe["t_end"]
+        new_base = []
+        p3_queue = []  # учёба для переноса после события
 
-def insert_and_shift(blocks, new_blk):
-    new_min = time_to_min(new_blk["t"])
+        for b in base:
+            bstart = tmin(b["t"])
+            bend = bstart + b.get("dur", 30)
+            p = b.get("p", 3)
+
+            if b.get("_evt"):
+                new_base.append(b)
+                continue
+
+            # Блок полностью внутри события
+            if bstart >= fe_start and bend <= fe_end:
+                if p == 1:
+                    new_base.append(b)  # P1 остаётся (например подъём не может быть внутри)
+                elif p == 2:
+                    # Обед внутри работы — оставляем если это логично (обеденное время)
+                    if b["id"] == "lunch" and fe_start <= bstart <= fe_start + 240:
+                        new_base.append(b)
+                    else:
+                        # Сдвигаем после события
+                        b = b.copy()
+                        b["t"] = mtime(fe_end)
+                        new_base.append(b)
+                elif p == 3:
+                    p3_queue.append(b)  # учёба — переносим после события
+                elif p == 4:
+                    pass  # перерывы внутри события — удаляем
+
+            # Блок частично пересекается
+            elif bstart < fe_end and bend > fe_start:
+                if p == 1:
+                    new_base.append(b)
+                elif p in (2, 3):
+                    b = b.copy()
+                    b["t"] = mtime(fe_end)
+                    new_base.append(b) if p == 2 else p3_queue.append(b)
+                elif p == 4:
+                    pass
+            else:
+                new_base.append(b)
+
+        # Вставляем учёбу после события в свободные слоты
+        cursor = fe_end
+        for b in sorted(p3_queue, key=lambda x: x.get("p",3)):
+            # Проверяем не слишком ли поздно
+            max_allowed = 22 * 60  # по умолчанию не позже 22:00
+            if cursor + b["dur"] <= max_allowed:
+                b = b.copy()
+                b["t"] = mtime(cursor)
+                cursor += b["dur"] + 10  # +10 мин перерыв
+                new_base.append(b)
+            # Если поздно — пропускаем P3, P2 сохраняем сжатыми
+
+        new_base.append(fe)
+        base = sorted(new_base, key=lambda x: tmin(x["t"]))
+
+    # Финальная проверка: P2 блоки не позже лимита
     result = []
-    shifted = False
-    current_min = new_min + new_blk.get("dur", 60)
-
-    for b in sorted(blocks, key=lambda x: time_to_min(x["t"])):
-        bmin = time_to_min(b["t"])
-        if not shifted and bmin >= new_min:
-            result.append(new_blk)
-            shifted = True
-        if shifted and bmin < current_min:
+    for b in base:
+        limit = LATEST_ALLOWED.get(b["id"])
+        if limit and tmin(b["t"]) > limit:
             b = b.copy()
-            b["t"] = min_to_time(current_min)
-            current_min += b.get("dur", 30)
+            b["t"] = mtime(limit)
         result.append(b)
 
-    if not shifted:
-        result.append(new_blk)
-    return result
+    return sorted(result, key=lambda x: tmin(x["t"]))
 
 # ─── PHASES ──────────────────────────────────────────────────────────────────
 
 PHASES = [
-    {
-        "id": "sl1", "cat": "🟣 Сольфеджио", "w": "1–4", "title": "Ноты и ритм",
-        "tasks": [
-            "Линейки скрипичного ключа: Ми-Соль-Си-Ре-Фа (Мама Гоши Сделала Рисовую Фигуру)",
-            "Промежутки: Фа-Ля-До-Ми",
-            "Ритм: целая=4, половинная=2, четверть=1, восьмая=0.5 — отстукивай по колену",
-            "Петь мелодию по нотам с фортепиано и без",
-        ],
-        "links": [
-            ("musictheory.net/lessons", "https://www.musictheory.net/lessons"),
-            ("Тренажёр нот", "https://www.musictheory.net/exercises/note"),
-        ]
-    },
-    {
-        "id": "sl2", "cat": "🟣 Сольфеджио", "w": "5–10", "title": "Интервалы и пение",
-        "req": "sl1",
-        "tasks": [
-            "Петь гамму До мажор по нотам с фортепиано и без",
-            "Диктант — записать мелодию на слух: найди первую ноту, запиши, дальше по слуху",
-            "Интонировать интервалы: терция, квинта, октава",
-        ],
-        "links": [
-            ("Тренажёр нот", "https://www.musictheory.net/exercises/note"),
-        ]
-    },
-    {
-        "id": "sl3", "cat": "🟣 Сольфеджио", "w": "11–20", "title": "Тональности",
-        "req": "sl2",
-        "tasks": [
-            "Знаки при ключе: диезы Фа-До-Соль-Ре-Ля-Ми-Си, бемоли обратно",
-            "1 диез=Соль мажор, 2=Ре мажор, 3=Ля мажор",
-            "Хроматическая гамма — петь и записывать",
-            "Транспозиция мелодии в другую тональность",
-        ],
-        "links": []
-    },
-    {
-        "id": "et1", "cat": "🟣 Ear Training", "w": "1–4", "title": "Интервалы",
-        "req": "sl1",
-        "tasks": [
-            "Тренажёр интервалов на слух — 20 мин в день",
-            "Ассоциации: малая терция=Подмосковные вечера, квинта=Star Wars, октава=Somewhere Over the Rainbow",
-            "Различать приму/терцию/квинту/октаву уверенно",
-            "Петь интервалы от любой ноты вверх и вниз",
-        ],
-        "links": [
-            ("Ear interval тренажёр", "https://www.musictheory.net/exercises/ear-interval"),
-        ]
-    },
-    {
-        "id": "et2", "cat": "🟣 Ear Training", "w": "5–8", "title": "Аккорды и лады",
-        "req": "et1",
-        "tasks": [
-            "Мажор=радостно, минор=грустно, G7=напряжённо — различать на слух",
-            "10–15 аккордов за сессию, записывай % угадывания",
-            "Анализ трека: мажор или минор? Где тоника? Первые 4 аккорда",
-        ],
-        "links": [
-            ("Ear chord тренажёр", "https://www.musictheory.net/exercises/ear-chord"),
-        ]
-    },
-    {
-        "id": "et3", "cat": "🟣 Ear Training", "w": "9–16", "title": "Тембр и частоты",
-        "req": "et2",
-        "tasks": [
-            "100 Гц=бум, 200–400=каша, 1–3 кГц=присутствие, 5–8 кГц=резкость",
-            "Ugадывать поднятую/срезанную частоту — 30 мин в день",
-            "Слышать компрессию без плагина: барабаны + ratio 10:1, bypass туда-сюда",
-        ],
-        "links": [
-            ("Quiztones — частоты", "https://www.quiztones.com"),
-        ]
-    },
-    {
-        "id": "pn1", "cat": "🔵 Фортепиано", "w": "1–4", "title": "Постановка рук",
-        "req": "sl1",
-        "tasks": [
-            "Разогрев 5 мин: сжимай пальцы от мизинца, вращай запястья по 10 раз",
-            "До-Ре-Ми-Фа-Соль каждой рукой — большой на До (C4), медленно с весом",
-            "Бах Менуэт BWV Anh.114: по 2 такта правая → левая → вместе",
-            "Не переходи дальше пока эти 2 такта не звучат уверенно",
-        ],
-        "links": [
-            ("Ноты Менуэта Баха (IMSLP)", "https://imslp.org/wiki/Minuet_in_G_major,_BWV_Anh.114_(Bach,_Johann_Sebastian)"),
-        ]
-    },
-    {
-        "id": "pn2", "cat": "🔵 Фортепиано", "w": "5–10", "title": "Гаммы + аккорды",
-        "req": "pn1",
-        "tasks": [
-            "Гамма До мажор двумя руками 2 октавы, метроном 60 bpm — аппликатура 1-2-3/1-2-3-4-5",
-            "Трезвучия До-Фа-Соль с левым басом",
-            "Пьеса по 4 такта: правая → левая → вместе, метроном обязателен",
-        ],
-        "links": [
-            ("Ноты Менуэта Баха (IMSLP)", "https://imslp.org/wiki/Minuet_in_G_major,_BWV_Anh.114_(Bach,_Johann_Sebastian)"),
-        ]
-    },
-    {
-        "id": "pn3", "cat": "🔵 Фортепиано", "w": "11–20", "title": "Джаз",
-        "req": "pn2",
-        "tasks": [
-            "Гаммы Соль (Фа#) и Ре (Фа#, До#) мажор, 2 октавы, 60–80 bpm",
-            "Cmaj7: До-Ми-Соль-Си. Dm7: Ре-Фа-Ля-До. G7: Соль-Си-Ре-Фа",
-            "Переходы Cmaj7→Dm7→G7→Cmaj7 — G7 хочет разрешиться в Cmaj7",
-            "Autumn Leaves: только аккорды левой рукой, один в 2–4 счёта",
-        ],
-        "links": [
-            ("Autumn Leaves ноты", "https://www.musicnotes.com/sheetmusic/mtd.asp?ppn=MN0063367"),
-        ]
-    },
-    {
-        "id": "fl1", "cat": "🔵 Флейта", "w": "1–2", "title": "Возобновление",
-        "req": "sl1",
-        "tasks": [
-            "Долгие ноты Ля/Си/До — один вдох, ровно, без вибрато. По 3–4 раза каждую",
-            "Гамма До мажор одна октава C4–C5, 50–60 bpm",
-            "Простая мелодия наизусть + запись на телефон",
-        ],
-        "links": []
-    },
-    {
-        "id": "fl2", "cat": "🔵 Флейта", "w": "3–8", "title": "Техника",
-        "req": "fl1",
-        "tasks": [
-            "Долгие ноты хроматически вверх: До, До#... до Соль второй октавы — каждую 4–8 счётов",
-            "Гаммы До C4–C6, Соль G4–G6 (Фа#), Ре D4–D6 (Фа#, До#) + арпеджио плавно",
-            "Этюд с метрономом. Раз в неделю — запись на телефон",
-        ],
-        "links": [
-            ("Андерсен op.33 (IMSLP)", "https://imslp.org/wiki/24_Etudes,_Op.33_(Andersen,_Joachim)"),
-        ]
-    },
-    {
-        "id": "mx1", "cat": "🔵 Микс + Pro Tools", "w": "1–3", "title": "PT: среда + анализ",
-        "tasks": [
-            "Command+= переключает Edit↔Mix window",
-            "Smart Tool = F6. R=запись, B=разрезать, Option+клик=bypass",
-            "Clip Gain (треугольник на клипе, до фейдера) vs Input Gain (на канале)",
-            "Референс в PT → EQ3 7-Band → 200–400 Гц чистые у хороших миксов. 3 конкретных наблюдения",
-        ],
-        "links": []
-    },
-    {
-        "id": "mx2", "cat": "🔵 Микс + Pro Tools", "w": "4–6", "title": "PT: сессия + баланс",
-        "req": "mx1",
-        "tasks": [
-            "Dante I/O: Setup→I/O. Naming: 01_Kick, 02_Snare, 10_Bass, 20_Vox",
-            "Memory Locations (.) — маркеры куплет/припев/бридж",
-            "Option+клик — выключить все инсерты. Грубый баланс только фейдеры и пан",
-            "HPF: вокал 80–100 Гц, гитара 100–120, клавиши 120–150. Бас/кик не режь",
-            "Узкий Q, свипируй — бочкообразный звук → срезай",
-        ],
-        "links": []
-    },
-    {
-        "id": "mx3", "cat": "🔵 Микс + Pro Tools", "w": "7–10", "title": "Плотность и динамика",
-        "req": "mx2",
-        "tasks": [
-            "Dyn3 на кике: ratio 4:1, attack 10 мс, GR 3–6 dB. Bypass — плотнее? Значит работает",
-            "Aux ← drum group: ratio 8:1, GR 10–15 dB, фейдер в ноль → медленно поднимай",
-            "Drum Bus + Bass Bus: сатурация 10–15%",
-            "Тест на телефоне — если читается, всё правильно",
-        ],
-        "links": []
-    },
-    {
-        "id": "mx4", "cat": "🔵 Микс + Pro Tools", "w": "11+", "title": "Реальные проекты",
-        "req": "mx3",
-        "tasks": [
-            "Протокол 8 шагов: 1.PT+шаблон 2.Референс 3.Баланс без плагинов 4.HPF+срез 5.Dyn3+параллельная 6.Реверб умеренно 7.Мониторы→наушники→телефон 8.Пауза 15 мин",
-            "Logic vs PT — сравнение workflow на одном материале",
-        ],
-        "links": []
-    },
+    # СОЛЬФЕДЖИО
+    {"id":"sl1","cat":"🟣 Сольфеджио","w":"1–4","title":"Ноты и ритм",
+     "tasks":[
+         "Линейки скрипичного ключа: Ми-Соль-Си-Ре-Фа\n→ мнемоника: «Мама Гоши Сделала Рисовую Фигуру»",
+         "Промежутки: Фа-Ля-До-Ми",
+         "Ритм: целая=4, половинная=2, четверть=1, восьмая=0.5\n→ отстукивай по колену под метроном",
+         "Петь мелодию по нотам: сначала с фортепиано, потом без",
+     ],
+     "links":[
+         ("📖 Уроки теории","https://www.musictheory.net/lessons"),
+         ("🎯 Тренажёр нот","https://www.musictheory.net/exercises/note"),
+         ("🎥 Нотная грамота за 12 мин (YouTube)","https://www.youtube.com/watch?v=ZN41d7Txbx8"),
+     ]},
+    {"id":"sl2","cat":"🟣 Сольфеджио","w":"5–10","title":"Интервалы и пение","req":"sl1",
+     "tasks":[
+         "Петь гамму До мажор по нотам — с фортепиано и без",
+         "Диктант: найди первую ноту на фортепиано → запиши → дальше по слуху",
+         "Интонировать интервалы: терция, квинта, октава",
+     ],
+     "links":[
+         ("🎯 Тренажёр нот","https://www.musictheory.net/exercises/note"),
+     ]},
+    {"id":"sl3","cat":"🟣 Сольфеджио","w":"11–20","title":"Тональности","req":"sl2",
+     "tasks":[
+         "Диезы: Фа-До-Соль-Ре-Ля-Ми-Си. Бемоли: обратно\n→ 1 диез=Соль, 2=Ре, 3=Ля мажор",
+         "Хроматическая гамма — петь и записывать",
+         "Транспозиция: перепиши Менуэт из До в Соль мажор (+квинта на каждую ноту)",
+     ],
+     "links":[]},
+
+    # EAR TRAINING
+    {"id":"et1","cat":"🟣 Ear Training","w":"1–4","title":"Интервалы","req":"sl1",
+     "tasks":[
+         "Ассоциации интервалов:\n→ малая терция = Подмосковные вечера\n→ квинта = Star Wars\n→ октава = Somewhere Over the Rainbow",
+         "Тренажёр интервалов — 20 мин в день, записывай % угадывания",
+         "Петь интервалы от любой ноты вверх и вниз",
+         "Цель: уверенно различать приму/терцию/квинту/октаву",
+     ],
+     "links":[
+         ("🎯 Ear interval тренажёр","https://www.musictheory.net/exercises/ear-interval"),
+     ]},
+    {"id":"et2","cat":"🟣 Ear Training","w":"5–8","title":"Аккорды и лады","req":"et1",
+     "tasks":[
+         "Мажор=радостно, минор=грустно, G7=напряжённо\n→ 10–15 аккордов за сессию",
+         "Анализ трека: тональность + первые 4 аккорда",
+         "Записывай % угадывания каждую сессию",
+     ],
+     "links":[
+         ("🎯 Ear chord тренажёр","https://www.musictheory.net/exercises/ear-chord"),
+     ]},
+    {"id":"et3","cat":"🟣 Ear Training","w":"9–16","title":"Тембр и частоты","req":"et2",
+     "tasks":[
+         "Карта частот:\n→ 100 Гц = бум\n→ 200–400 = каша\n→ 1–3 кГц = присутствие\n→ 5–8 кГц = резкость\n→ 10+ кГц = воздух",
+         "Quiztones — угадывать частоту, 30 мин в день",
+         "Слышать компрессию без плагина: барабаны + ratio 10:1, bypass туда-сюда",
+     ],
+     "links":[
+         ("🎯 Quiztones","https://www.quiztones.com"),
+     ]},
+
+    # ФОРТЕПИАНО
+    {"id":"pn1","cat":"🔵 Фортепиано","w":"1–4","title":"Постановка рук","req":"sl1",
+     "tasks":[
+         "Разогрев 5 мин:\n→ сжимай пальцы от мизинца к указательному\n→ вращай запястья по 10 раз",
+         "До-Ре-Ми-Фа-Соль каждой рукой:\n→ большой палец на До (C4)\n→ медленно, с весом, каждый палец опускается",
+         "Бах Менуэт BWV Anh.114:\n→ по 2 такта: правая → левая → вместе\n→ не переходи дальше пока не звучит уверенно",
+     ],
+     "links":[
+         ("🎼 Ноты Менуэта (IMSLP)","https://imslp.org/wiki/Minuet_in_G_major,_BWV_Anh.114_(Bach,_Johann_Sebastian)"),
+         ("🎥 Разбор Менуэта Баха","https://www.youtube.com/watch?v=pDOCBTJMQLk"),
+     ]},
+    {"id":"pn2","cat":"🔵 Фортепиано","w":"5–10","title":"Гаммы + аккорды","req":"pn1",
+     "tasks":[
+         "Гамма До мажор двумя руками 2 октавы:\n→ аппликатура 1-2-3/1-2-3-4-5\n→ метроном 60 bpm",
+         "Трезвучия До–Фа–Соль с левым басом",
+         "По 4 такта с метрономом: правая → левая → вместе",
+     ],
+     "links":[
+         ("🎼 Ноты Менуэта (IMSLP)","https://imslp.org/wiki/Minuet_in_G_major,_BWV_Anh.114_(Bach,_Johann_Sebastian)"),
+     ]},
+    {"id":"pn3","cat":"🔵 Фортепиано","w":"11–20","title":"Джаз","req":"pn2",
+     "tasks":[
+         "Гаммы Соль (Фа#) и Ре (Фа#, До#) — 2 октавы, 60–80 bpm",
+         "Септаккорды:\n→ Cmaj7: До-Ми-Соль-Си\n→ Dm7: Ре-Фа-Ля-До\n→ G7: Соль-Си-Ре-Фа\n→ G7 «хочет» разрешиться в Cmaj7",
+         "Autumn Leaves: только аккорды левой рукой, один в 2–4 счёта",
+     ],
+     "links":[
+         ("🎼 Autumn Leaves ноты","https://www.musicnotes.com/sheetmusic/mtd.asp?ppn=MN0063367"),
+         ("🎥 Autumn Leaves для начинающих","https://www.youtube.com/watch?v=RMrBMFVwdSE"),
+     ]},
+
+    # ФЛЕЙТА
+    {"id":"fl1","cat":"🔵 Флейта","w":"1–2","title":"Возобновление","req":"sl1",
+     "tasks":[
+         "Долгие ноты Ля/Си/До:\n→ один вдох, ровно, без вибрато\n→ по 3–4 раза каждую",
+         "Гамма До мажор C4–C5, 50–60 bpm",
+         "Простая мелодия наизусть + запись на телефон",
+     ],
+     "links":[]},
+    {"id":"fl2","cat":"🔵 Флейта","w":"3–8","title":"Техника","req":"fl1",
+     "tasks":[
+         "Разогрев: хроматически вверх До→До#→Ре... до Соль второй октавы, каждую 4–8 счётов",
+         "Гаммы До C4–C6, Соль G4–G6, Ре D4–D6 + арпеджио плавно",
+         "Этюд с метрономом. Раз в неделю — запись на телефон",
+     ],
+     "links":[
+         ("🎼 Андерсен op.33 (IMSLP)","https://imslp.org/wiki/24_Etudes,_Op.33_(Andersen,_Joachim)"),
+     ]},
+
+    # PRO TOOLS — по курсу Udemy "Avid Pro Tools: Beginner to Advanced"
+    {"id":"pt1","cat":"🔵 Pro Tools","w":"1–2","title":"Установка и первая сессия",
+     "tasks":[
+         "Лекция 01 (13 мин): Установка Pro Tools\n→ активация Avid, выбор аудиодрайвера",
+         "Лекция 02 (8 мин): Создание сессии\n→ sample rate, bit depth, путь сохранения",
+         "Лекция 03 (21 мин): Аудиотреки\n→ создание, именование, запись",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+         ("📖 Avid документация","https://resources.avid.com/SupportFiles/PT/Pro%20Tools%20Reference%20Guide.pdf"),
+     ]},
+    {"id":"pt2","cat":"🔵 Pro Tools","w":"2–3","title":"Режимы редактирования и Fades",
+     "tasks":[
+         "Лекция 04 (25 мин): Edit Modes и Fades\n→ Shuffle / Slip / Spot / Grid\n→ Smart Tool = F6\n→ Command+= Edit↔Mix",
+         "Лекция 18 (6 мин): Clip Gain vs Volume Automation\n→ Clip Gain = до фейдера (треугольник на клипе)\n→ Volume Automation = после фейдера",
+         "Лекция 19 (11 мин): Edit Modes Recap\n→ Relative Grid Mode",
+         "Шорткаты: R=запись, B=разрезать, Option+клик=bypass",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt3","cat":"🔵 Pro Tools","w":"3–4","title":"MIDI, EQ и Inserts",
+     "tasks":[
+         "Лекция 05 (28 мин): MIDI ноты и Quantize\n→ Piano Roll, квантизация",
+         "Лекция 06 (14 мин): Inserts и EQ плагин\n→ EQ3 7-Band: HPF, Low/Mid/High shelf",
+         "Практика: HPF на каждом треке\n→ вокал 80–100 Гц, гитара 100–120, клавиши 120–150",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt4","cat":"🔵 Pro Tools","w":"4–5","title":"Эффекты, Sends и Busses",
+     "tasks":[
+         "Лекция 07 (30 мин): Effects, Sends и Busses\n→ Aux треки, шины, параллельная обработка",
+         "Лекция 11 (9 мин): Pre vs Post Fader Sends\n→ Pre Fader = не зависит от фейдера\n→ Post Fader = зависит",
+         "Лекция 08 (22 мин): Printing to Audio Track\n→ запись обработанного сигнала",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt5","cat":"🔵 Pro Tools","w":"5–6","title":"Автоматизация и запись",
+     "tasks":[
+         "Лекция 13 (9 мин): Volume Automation\n→ режимы Write/Touch/Latch/Read",
+         "Лекция 14 (5 мин): More on Automation",
+         "Лекция 17 (25 мин): Playlists для записи нескольких дублей",
+         "Лекция 16 (5 мин): Запись гитарной партии",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt6","cat":"🔵 Pro Tools","w":"6–7","title":"Организация и импорт",
+     "tasks":[
+         "Лекция 21 (9 мин): Backup сессии",
+         "Лекция 23 (7 мин): Импорт аудио",
+         "Лекция 24 (12 мин): Именование и цветовое кодирование треков\n→ 01_Kick, 02_Snare, 10_Bass, 20_Vox",
+         "Лекция 25 (14 мин): Auxiliary Tracks и Routing Folders",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt7","cat":"🔵 Pro Tools","w":"7–8","title":"Сведение: EQ и баланс",
+     "tasks":[
+         "Лекция 26 (17 мин): Editing and Balancing\n→ грубый баланс без плагинов — только фейдеры и пан",
+         "Лекция Reverb and Delay (24 мин): реверб и дилей\n→ умеренно, через Aux",
+         "Лекция Delay and Compression (23 мин): компрессия\n→ Dyn3: ratio 4:1, attack 10мс, GR 3–6 dB",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt8","cat":"🔵 Pro Tools","w":"8–9","title":"Сведение: динамика и мастеринг",
+     "tasks":[
+         "Лекция Sends Automation (17 мин): автоматизация отправок",
+         "Лекция Loudness Units (11 мин): LUFS, true peak\n→ стриминг: -14 LUFS, -1 dBTP",
+         "Лекция Bouncing a Mix (12 мин): финальный баунс\n→ форматы, настройки",
+         "Практика: тест на телефоне, наушниках, мониторах",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt9","cat":"🔵 Pro Tools","w":"9–10","title":"Продвинутые инструменты",
+     "tasks":[
+         "Лекция Consolidate & Clip Grouping (6 мин)",
+         "Лекция AudioSuite (4 мин): оффлайн-обработка",
+         "Лекция Tab to Transients (3 мин)",
+         "Лекция Strip Silence (6 мин)",
+         "Лекция Batch Rename (7 мин)",
+         "Лекция Import Session Data (4 мин)",
+         "Лекция Saving a Session Template (3 мин): создание шаблона",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
+    {"id":"pt10","cat":"🔵 Pro Tools","w":"11+","title":"Реальные проекты",
+     "tasks":[
+         "Протокол 8 шагов на каждый проект:\n1. PT + шаблон\n2. Референс того же жанра\n3. Грубый баланс без плагинов\n4. HPF + срез резонансов\n5. Dyn3 + параллельная компрессия\n6. Реверб/дилей умеренно\n7. Мониторы → наушники → телефон\n8. Пауза 15 мин — свежим ухом",
+         "Лекция Mixing, Reverb, EQ, Compression (33 мин): полный цикл сведения",
+         "Лекция Signal Chain Recap (8 мин): порядок обработки",
+     ],
+     "links":[
+         ("🎥 Udemy курс Pro Tools","https://www.udemy.com/course/avid-pro-tools-beginner-to-advanced/"),
+     ]},
 ]
 
-def is_unlocked(ph, prog):
+def unlocked(ph, prog):
     req = ph.get("req")
-    if not req:
-        return True
-    r = next((p for p in PHASES if p["id"] == req), None)
-    if not r:
-        return True
-    return all(prog.get(f"{r['id']}_{i}") for i in range(len(r["tasks"])))
+    if not req: return True
+    r = next((p for p in PHASES if p["id"]==req), None)
+    return r and all(prog.get(f"{r['id']}_{i}") for i in range(len(r["tasks"])))
 
-# ─── KEYBOARDS ───────────────────────────────────────────────────────────────
+# ─── МЕНЮ ────────────────────────────────────────────────────────────────────
 
-def main_menu_kb():
+def main_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📅 Сегодня", callback_data="today"),
-         InlineKeyboardButton("📅 Завтра", callback_data="tomorrow")],
+         InlineKeyboardButton("📅 Завтра",  callback_data="tomorrow")],
         [InlineKeyboardButton("🗓 Календарь", callback_data="cal_menu"),
          InlineKeyboardButton("📖 Методичка", callback_data="method")],
         [InlineKeyboardButton("🔥 Привычки", callback_data="habits_0"),
          InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-        [InlineKeyboardButton("⚙️ Настройки расписания", callback_data="sched_settings")],
+        [InlineKeyboardButton("✏️ Редактор", callback_data="editor"),
+         InlineKeyboardButton("📋 Памятка", callback_data="guide")],
+        [InlineKeyboardButton("😴 Сон и фокус", callback_data="sleep_tips")],
     ])
 
-# ─── RENDER DAY ──────────────────────────────────────────────────────────────
+# ─── DAY VIEW ────────────────────────────────────────────────────────────────
 
-def render_day(date_str, data, page=0):
-    evts = data.get("cal", {}).get(date_str, [])
-    blocks = get_blocks(date_str, data)
-    checked = data.get("days", {}).get(date_str, {}).get("checked", {})
+def render_day(ds, data, pg=0):
+    blocks = build_schedule(ds, data)
+    evts = data.get("cal",{}).get(ds,[])
+    checked = data.get("days",{}).get(ds,{}).get("checked",{})
     done = sum(1 for b in blocks if checked.get(b["id"]))
-    pct = round(done / len(blocks) * 100) if blocks else 0
+    pct = round(done/len(blocks)*100) if blocks else 0
+    bar = "█"*(pct//10)+"░"*(10-pct//10)
 
-    lines = [f"*{day_name(date_str)}*"]
-    evt_icons = {"orch": "🎼", "live": "🎤", "busy": "📌", "personal": "👤"}
+    lines = [f"*{day_label(ds)}*"]
     for e in evts:
-        icon = evt_icons.get(e.get("type"), "•")
-        lines.append(f"{icon} {e.get('text', '')}")
+        icon = {"busy":"📌","personal":"👤","orch":"🎼","live":"🎤"}.get(e.get("type"),"•")
+        tr = f" {e['t_from']}–{e['t_to']}" if e.get("t_from") else ""
+        lines.append(f"{icon} {e.get('text','')}{tr}")
+    lines.append(f"\n{bar} {pct}% ({done}/{len(blocks)})\n{'─'*28}")
 
-    bar_filled = pct // 10
-    bar = "█" * bar_filled + "░" * (10 - bar_filled)
-    lines.append(f"\n{bar} {pct}% ({done}/{len(blocks)})")
-    lines.append("─" * 28)
+    per=8; total=(len(blocks)+per-1)//per
+    pg=max(0,min(pg,total-1))
+    visible=blocks[pg*per:(pg+1)*per]
 
-    # Пагинация — по 8 блоков на страницу
-    per_page = 8
-    total_pages = (len(blocks) + per_page - 1) // per_page
-    page = max(0, min(page, total_pages - 1))
-    visible = blocks[page * per_page:(page + 1) * per_page]
-
-    kb_rows = []
+    kb=[]
     for b in visible:
-        ck = checked.get(b["id"], False)
-        mark = "✅" if ck else "⬜"
-        label = f"{mark} {b['t']} {b['n']}"
-        kb_rows.append([
-            InlineKeyboardButton(label, callback_data=f"tog_{date_str}_{b['id']}_{page}"),
-            InlineKeyboardButton("✏️", callback_data=f"edit_blk_{date_str}_{b['id']}_{page}"),
-        ])
+        ck=checked.get(b["id"],False)
+        label=f"{'✅' if ck else '⬜'} {b['t']} {b['n']}"
+        kb.append([InlineKeyboardButton(label, callback_data=f"tog_{ds}_{b['id']}_{pg}")])
 
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("◀", callback_data=f"day_{date_str}_{page-1}"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("▶", callback_data=f"day_{date_str}_{page+1}"))
-    if nav:
-        kb_rows.append(nav)
+    nav=[]
+    if pg>0: nav.append(InlineKeyboardButton("◀", callback_data=f"day_{ds}_{pg-1}"))
+    if pg<total-1: nav.append(InlineKeyboardButton("▶", callback_data=f"day_{ds}_{pg+1}"))
+    if nav: kb.append(nav)
 
-    kb_rows.append([
-        InlineKeyboardButton("➕ Событие", callback_data=f"add_evt_{date_str}"),
-        InlineKeyboardButton("➕ Блок", callback_data=f"add_blk_{date_str}"),
-    ])
-    kb_rows.append([InlineKeyboardButton("← Меню", callback_data="menu")])
+    kb.append([InlineKeyboardButton("➕ Добавить событие", callback_data=f"add_evt_{ds}")])
+    kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
+    return "\n".join(lines), InlineKeyboardMarkup(kb)
 
-    return "\n".join(lines), InlineKeyboardMarkup(kb_rows)
+# ─── GUIDE (ПАМЯТКА) ─────────────────────────────────────────────────────────
 
-# ─── RENDER METHOD ───────────────────────────────────────────────────────────
+GUIDE_TEXT = """*📋 Памятка по категориям расписания*
+
+🔴 *P1 — Фиксированные* (не двигаются никогда)
+→ Подъём, отбой, работа, оркестр, важные встречи
+→ Всё остальное строится вокруг них
+
+🟡 *P2 — Гибкие обязательные* (двигаются, не удаляются)
+→ Завтрак, обед, ревью дня, подготовка ко сну
+→ Обед внутри работы — остаётся (логично)
+→ Имеют лимит: обед не позже 14:00, отбой не позже 23:00
+
+🟢 *P3 — Учёба* (переносятся в свободные слоты)
+→ Сольфеджио, фортепиано, флейта, ear training, микс
+→ Если слот занят — переносятся после события
+→ Если после события слишком поздно — пропускаются на этот день
+
+⚪ *P4 — Заполнители* (удаляются если нет места)
+→ Перерывы, свободное время
+→ Внутри рабочего блока — убираются автоматически
+
+─────────────────────────
+*Как добавить событие:*
+Нажми ➕ в расписании → выбери тип → напиши:
+`Название 14:00–16:00`
+
+Расписание само сдвинется под твой промежуток.
+─────────────────────────
+*Совет дня:*
+Максимум 2 учебных блока в день — один Pro Tools, один инструмент. Качество важнее количества."""
+
+# ─── SLEEP TIPS ──────────────────────────────────────────────────────────────
+
+SLEEP_TEXT = """*😴 Сон и фокус — практическое руководство*
+
+*Проблема:* поздний подъём, сложно заснуть, нет энергии днём.
+
+─────────────────────────
+*🌅 Утро — первые 30 минут*
+
+1. Подъём в одно время даже в выходные — это главное
+2. Сразу вода — 1–2 стакана (тело обезвожено после сна)
+3. Телефон — только через 20 мин после подъёма
+4. Свет: открой шторы или выйди на балкон — запускает циркадный ритм
+5. Не проверяй соцсети пока не позавтракал
+
+*Почему:* первые 30 мин задают тон всему дню. Телефон сразу = тревожность и рассеянность.
+
+─────────────────────────
+*☀️ День — поддержание фокуса*
+
+• Правило 25+5: работай 25 мин, перерыв 5 мин (Pomodoro)
+• Перерыв = встать, пройтись, вода. Не телефон
+• Кофе — не раньше 09:30 (не сразу после подъёма — кортизол и так высокий)
+• Кофе — не позже 15:00 (иначе мешает сну)
+• Обед без экрана хотя бы 15 мин
+
+─────────────────────────
+*🌙 Вечер — подготовка ко сну*
+
+• За 1 час до сна: приглуши свет (телефон на min яркость)
+• Телефон убираем в 21:00 — ревью записываешь в блокнот или диктуешь
+• Не ешь за 2 часа до сна
+• Температура в комнате 18–20°C — идеально для сна
+• Если не можешь заснуть: дыхание 4-7-8 (вдох 4 сек, задержка 7, выдох 8)
+
+─────────────────────────
+*📱 Телефон и мозг*
+
+Синий свет экрана подавляет мелатонин на 2–3 часа.
+Соцсети перед сном = мозг получает дофамин и не может успокоиться.
+
+Решение: Night mode + автояркость с 20:00.
+Идеально: телефон за дверью спальни.
+
+─────────────────────────
+*⚡ Если сбился режим*
+
+Не отсыпайся до обеда — это сдвигает цикл ещё дальше.
+Встань в запланированное время (даже если поздно лёг).
+Один-два дня — и ритм восстановится.
+
+─────────────────────────
+*📈 Твой план:*
+→ Подъём 07:30 — без исключений
+→ Отбой 22:00 — телефон убран в 21:00
+→ Через 2 недели стабильного режима станет значительно легче"""
+
+# ─── METHOD ──────────────────────────────────────────────────────────────────
 
 def render_method(data):
-    prog = data.get("prog", {})
-    cats = list(dict.fromkeys(ph["cat"] for ph in PHASES))
-    text = "*📖 Методичка*\nНажми на фазу чтобы открыть:"
-    kb_rows = []
+    prog = data.get("prog",{})
+    cats = list(dict.fromkeys(p["cat"] for p in PHASES))
+    kb=[]
     for cat in cats:
-        kb_rows.append([InlineKeyboardButton(f"─ {cat} ─", callback_data="noop")])
+        kb.append([InlineKeyboardButton(f"── {cat} ──", callback_data="noop")])
         for ph in PHASES:
-            if ph["cat"] != cat:
-                continue
-            unlocked = is_unlocked(ph, prog)
-            tot = len(ph["tasks"])
-            dn = sum(1 for i in range(tot) if prog.get(f"{ph['id']}_{i}"))
-            pct = round(dn / tot * 100) if tot else 0
-            bar = "█" * (pct // 25) + "░" * (4 - pct // 25)
-            lock = "" if unlocked else "🔒 "
-            label = f"{lock}{ph['title']} [{ph['w']}н] {bar} {dn}/{tot}"
-            kb_rows.append([InlineKeyboardButton(label, callback_data=f"phase_{ph['id']}")])
-    kb_rows.append([InlineKeyboardButton("← Меню", callback_data="menu")])
-    return text, InlineKeyboardMarkup(kb_rows)
+            if ph["cat"]!=cat: continue
+            ul=unlocked(ph,prog)
+            tot=len(ph["tasks"])
+            dn=sum(1 for i in range(tot) if prog.get(f"{ph['id']}_{i}"))
+            pct=round(dn/tot*100) if tot else 0
+            bar="█"*(pct//25)+"░"*(4-pct//25)
+            label=f"{'🔒 ' if not ul else ''}{ph['title']} [{ph['w']}н] {bar} {dn}/{tot}"
+            kb.append([InlineKeyboardButton(label, callback_data=f"phase_{ph['id']}")])
+    kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
+    return "*📖 Методичка*\nНажми на фазу:", InlineKeyboardMarkup(kb)
 
-def render_phase(ph_id, data):
-    prog = data.get("prog", {})
-    ph = next((p for p in PHASES if p["id"] == ph_id), None)
-    if not ph:
-        return "Не найдено", InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="method")]])
-
-    unlocked = is_unlocked(ph, prog)
-    lines = [f"*{ph['cat']} — {ph['title']}*", f"📅 Недели: {ph['w']}"]
-
-    if not unlocked:
-        req = next((p for p in PHASES if p["id"] == ph.get("req")), None)
-        lines.append(f"\n🔒 Сначала завершить: *{req['title'] if req else ph.get('req')}*")
+def render_phase(pid, data):
+    prog=data.get("prog",{})
+    ph=next((p for p in PHASES if p["id"]==pid),None)
+    if not ph: return "Не найдено", InlineKeyboardMarkup([[InlineKeyboardButton("←", callback_data="method")]])
+    ul=unlocked(ph,prog)
+    lines=[f"*{ph['cat']} — {ph['title']}*", f"📅 Недели: {ph['w']}"]
+    if not ul:
+        r=next((p for p in PHASES if p["id"]==ph.get("req")),None)
+        lines.append(f"\n🔒 Сначала: *{r['title'] if r else ph.get('req')}*")
         return "\n".join(lines), InlineKeyboardMarkup([[InlineKeyboardButton("← Методичка", callback_data="method")]])
-
     if ph.get("links"):
         lines.append("\n📎 *Материалы:*")
-        for name, url in ph["links"]:
-            lines.append(f"[{name}]({url})")
-
+        for name,url in ph["links"]: lines.append(f"[{name}]({url})")
     lines.append("\n*Задачи:*")
-    kb_rows = []
-    for i, task in enumerate(ph["tasks"]):
-        done = prog.get(f"{ph_id}_{i}", False)
-        mark = "✅" if done else "⬜"
-        short = task[:40] + "…" if len(task) > 40 else task
-        kb_rows.append([InlineKeyboardButton(f"{mark} {short}", callback_data=f"tog_prog_{ph_id}_{i}")])
-
-    kb_rows.append([InlineKeyboardButton("← Методичка", callback_data="method")])
-    return "\n".join(lines), InlineKeyboardMarkup(kb_rows)
+    kb=[]
+    for i,task in enumerate(ph["tasks"]):
+        done=prog.get(f"{pid}_{i}",False)
+        first_line=task.split("\n")[0]
+        short=first_line[:48]+"…" if len(first_line)>48 else first_line
+        kb.append([InlineKeyboardButton(f"{'✅' if done else '⬜'} {short}", callback_data=f"tog_prog_{pid}_{i}")])
+    kb.append([InlineKeyboardButton("← Методичка", callback_data="method")])
+    return "\n".join(lines), InlineKeyboardMarkup(kb)
 
 # ─── HABITS ──────────────────────────────────────────────────────────────────
 
-def render_habits(data, week_offset=0):
-    hab = data.get("hab", {})
-    now = now_almaty()
-    monday = now - timedelta(days=now.weekday()) + timedelta(weeks=week_offset)
-    dates = [(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
-    dn = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
-    cats = [("piano","🔵 Форте"),("flute","🔵 Флейта"),("mix","🔵 Учёба"),("review","🔴 Ревью")]
-    months = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"]
-    f = datetime.strptime(dates[0], "%Y-%m-%d")
-    l = datetime.strptime(dates[6], "%Y-%m-%d")
-    text = f"*🔥 Привычки*\n{f.day} {months[f.month-1]} – {l.day} {months[l.month-1]}"
-    kb_rows = []
-    for cat, lbl in cats:
-        kb_rows.append([InlineKeyboardButton(lbl, callback_data="noop")])
-        row = []
-        for i, d in enumerate(dates):
-            on = hab.get(f"{d}_{cat}", False)
-            dt = datetime.strptime(d, "%Y-%m-%d")
-            day_lbl = f"{'✅' if on else dn[i]}\n{dt.day}"
-            row.append(InlineKeyboardButton("✅" if on else dn[i], callback_data=f"tog_hab_{d}_{cat}_{week_offset}"))
-        kb_rows.append(row)
-    kb_rows.append([
-        InlineKeyboardButton("◀", callback_data=f"habits_{week_offset-1}"),
-        InlineKeyboardButton("▶", callback_data=f"habits_{week_offset+1}"),
-    ])
-    kb_rows.append([InlineKeyboardButton("← Меню", callback_data="menu")])
-    return text, InlineKeyboardMarkup(kb_rows)
+def render_habits(data, off=0):
+    hab=data.get("hab",{})
+    mon=now_a()-timedelta(days=now_a().weekday())+timedelta(weeks=off)
+    dates=[(mon+timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+    dn=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    months=["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"]
+    f=datetime.strptime(dates[0],"%Y-%m-%d"); l=datetime.strptime(dates[6],"%Y-%m-%d")
+    cats=[("piano","🔵 Форте"),("flute","🔵 Флейта"),("mix","🔵 Учёба"),("review","🔴 Ревью")]
+    kb=[]
+    for cat,lbl in cats:
+        kb.append([InlineKeyboardButton(lbl, callback_data="noop")])
+        kb.append([InlineKeyboardButton("✅" if hab.get(f"{d}_{cat}") else dn[i], callback_data=f"tog_hab_{d}_{cat}_{off}") for i,d in enumerate(dates)])
+    kb.append([InlineKeyboardButton("◀", callback_data=f"habits_{off-1}"), InlineKeyboardButton("▶", callback_data=f"habits_{off+1}")])
+    kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
+    return f"*🔥 Привычки*\n{f.day} {months[f.month-1]} – {l.day} {months[l.month-1]}", InlineKeyboardMarkup(kb)
 
 # ─── STATS ───────────────────────────────────────────────────────────────────
 
 def render_stats(data):
-    hab = data.get("hab", {})
-    prog = data.get("prog", {})
-    piano = sum(1 for k,v in hab.items() if k.endswith("_piano") and v)
-    flute = sum(1 for k,v in hab.items() if k.endswith("_flute") and v)
-    mix = sum(1 for k,v in hab.items() if k.endswith("_mix") and v)
-    review = sum(1 for k,v in hab.items() if k.endswith("_review") and v)
-    streak = 0
-    tk = today_key()
+    hab=data.get("hab",{}); prog=data.get("prog",{})
+    streak=0; tk=today_key()
     for i in range(365):
-        d = (now_almaty() - timedelta(days=i)).strftime("%Y-%m-%d")
-        if hab.get(f"{d}_review") or hab.get(f"{d}_piano") or hab.get(f"{d}_mix"):
-            streak += 1
-        elif d != tk:
-            break
-    ph_done = sum(1 for ph in PHASES if all(prog.get(f"{ph['id']}_{i}") for i in range(len(ph["tasks"]))))
-    text = (f"*📊 Статистика*\n\n"
-            f"🔥 Стрик: *{streak}* дней подряд\n\n"
-            f"🔵 Фортепиано: *{piano}* сессий\n"
-            f"🔵 Флейта: *{flute}* сессий\n"
-            f"🔵 Учёба/микс: *{mix}* сессий\n"
-            f"🔴 Ревью: *{review}* дней\n\n"
-            f"📖 Фаз пройдено: *{ph_done}/{len(PHASES)}*")
+        d=(now_a()-timedelta(days=i)).strftime("%Y-%m-%d")
+        if hab.get(f"{d}_review") or hab.get(f"{d}_piano") or hab.get(f"{d}_mix"): streak+=1
+        elif d!=tk: break
+    ph_done=sum(1 for ph in PHASES if all(prog.get(f"{ph['id']}_{i}") for i in range(len(ph["tasks"]))))
+    text=(f"*📊 Статистика*\n\n🔥 Стрик: *{streak}* дней\n\n"
+          f"🔵 Фортепиано: *{sum(1 for k,v in hab.items() if k.endswith('_piano') and v)}* сессий\n"
+          f"🔵 Флейта: *{sum(1 for k,v in hab.items() if k.endswith('_flute') and v)}* сессий\n"
+          f"🔵 Учёба: *{sum(1 for k,v in hab.items() if k.endswith('_mix') and v)}* сессий\n"
+          f"🔴 Ревью: *{sum(1 for k,v in hab.items() if k.endswith('_review') and v)}* дней\n\n"
+          f"📖 Фаз пройдено: *{ph_done}/{len(PHASES)}*")
     return text, InlineKeyboardMarkup([[InlineKeyboardButton("← Меню", callback_data="menu")]])
 
 # ─── CALENDAR ────────────────────────────────────────────────────────────────
 
-def render_cal_menu(data):
-    now = now_almaty()
-    text = "*🗓 Календарь — ближайшие дни*"
-    kb_rows = []
-    row = []
+def render_cal(data):
+    kb=[]; row=[]
     for i in range(14):
-        d = now + timedelta(days=i)
-        ds = d.strftime("%Y-%m-%d")
-        evts = data.get("cal", {}).get(ds, [])
-        checked = data.get("days", {}).get(ds, {}).get("checked", {})
-        blocks = get_blocks(ds, data)
-        done = sum(1 for b in blocks if checked.get(b["id"]))
-        pct = round(done / len(blocks) * 100) if blocks else 0
-        dot = "🟢" if pct == 100 else ("🟡" if pct > 0 else ("🔴" if evts else "⬜"))
-        label = f"{dot}{d.day}"
-        row.append(InlineKeyboardButton(label, callback_data=f"cal_day_{ds}_0"))
-        if len(row) == 7:
-            kb_rows.append(row)
-            row = []
-    if row:
-        kb_rows.append(row)
-    kb_rows.append([InlineKeyboardButton("← Меню", callback_data="menu")])
-    return text, InlineKeyboardMarkup(kb_rows)
+        d=now_a()+timedelta(days=i); ds=d.strftime("%Y-%m-%d")
+        evts=data.get("cal",{}).get(ds,[])
+        checked=data.get("days",{}).get(ds,{}).get("checked",{})
+        blocks=build_schedule(ds,data)
+        done=sum(1 for b in blocks if checked.get(b["id"]))
+        pct=round(done/len(blocks)*100) if blocks else 0
+        dot="🟢" if pct==100 else("🟡" if pct>0 else("🔴" if evts else "⬜"))
+        row.append(InlineKeyboardButton(f"{dot}{d.day}", callback_data=f"day_{ds}_0"))
+        if len(row)==7: kb.append(row); row=[]
+    if row: kb.append(row)
+    kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
+    return "*🗓 Календарь*", InlineKeyboardMarkup(kb)
 
-# ─── SCHEDULE SETTINGS ───────────────────────────────────────────────────────
+# ─── EDITOR ──────────────────────────────────────────────────────────────────
 
-def render_sched_settings():
-    text = "*⚙️ Настройки расписания*\n\nЧто хочешь сделать?"
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✏️ Изменить блок", callback_data="edit_default_list")],
-        [InlineKeyboardButton("➕ Добавить блок", callback_data="add_default_blk")],
-        [InlineKeyboardButton("🔄 Сбросить к стандарту", callback_data="reset_sched")],
-        [InlineKeyboardButton("← Меню", callback_data="menu")],
+def render_editor():
+    kb=[]
+    for b in DEFAULT:
+        p_icon=["","🔴","🟡","🟢","⚪"][b.get("p",3)]
+        kb.append([InlineKeyboardButton(f"{p_icon} {b['t']} — {b['n']}", callback_data=f"ed_blk_{b['id']}")])
+    kb.append([InlineKeyboardButton("➕ Добавить блок", callback_data="ed_add")])
+    kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
+    return "*✏️ Редактор расписания*\nНажми на блок:", InlineKeyboardMarkup(kb)
+
+def render_edit_block(bid):
+    b=next((x for x in DEFAULT if x["id"]==bid),None)
+    if not b: return "Не найдено", InlineKeyboardMarkup([[InlineKeyboardButton("←", callback_data="editor")]])
+    p_names={1:"🔴 Фиксированный",2:"🟡 Гибкий обязательный",3:"🟢 Учёба",4:"⚪ Заполнитель"}
+    text=f"*{b['t']} — {b['n']}*\n{b['d']}\nПриоритет: {p_names.get(b.get('p',3),'?')}\nЧто изменить?"
+    kb=InlineKeyboardMarkup([
+        [InlineKeyboardButton("🕐 Время", callback_data=f"ed_f_t_{bid}"),
+         InlineKeyboardButton("📝 Название", callback_data=f"ed_f_n_{bid}")],
+        [InlineKeyboardButton("⬆️ Приоритет выше", callback_data=f"ed_p_up_{bid}"),
+         InlineKeyboardButton("⬇️ Приоритет ниже", callback_data=f"ed_p_dn_{bid}")],
+        [InlineKeyboardButton("🗑 Удалить", callback_data=f"ed_del_{bid}")],
+        [InlineKeyboardButton("← Назад", callback_data="editor")],
     ])
     return text, kb
-
-def render_edit_default_list():
-    text = "*✏️ Выбери блок для изменения:*"
-    kb_rows = []
-    for b in DEFAULT_BLOCKS:
-        kb_rows.append([InlineKeyboardButton(f"{b['t']} {b['n']}", callback_data=f"edit_default_{b['id']}")])
-    kb_rows.append([InlineKeyboardButton("← Назад", callback_data="sched_settings")])
-    return text, InlineKeyboardMarkup(kb_rows)
 
 # ─── HANDLERS ────────────────────────────────────────────────────────────────
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Привет, Марк!\n\nТвой персональный планировщик. Выбери раздел:",
-        reply_markup=main_menu_kb(),
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text("👋 Привет, Марк!\n\nВыбери раздел:", reply_markup=main_kb(), parse_mode="Markdown")
 
-async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    data = load()
-    d = q.data
+async def myid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Твой chat\\_id: `{update.effective_chat.id}`", parse_mode="Markdown")
 
-    if d == "menu":
-        await q.edit_message_text("Выбери раздел:", reply_markup=main_menu_kb())
+async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q=update.callback_query; await q.answer()
+    data=load(); d=q.data
 
-    elif d == "today":
-        text, kb = render_day(today_key(), data, 0)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d == "tomorrow":
-        text, kb = render_day(tomorrow_key(), data, 0)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
+    if d=="menu": await q.edit_message_text("Выбери раздел:", reply_markup=main_kb())
+    elif d=="today":
+        t,kb=render_day(today_key(),data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d=="tomorrow":
+        t,kb=render_day(tomorrow_key(),data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
     elif d.startswith("day_"):
-        parts = d.split("_")
-        date_str = parts[1]
-        page = int(parts[2]) if len(parts) > 2 else 0
-        text, kb = render_day(date_str, data, page)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d.startswith("cal_day_"):
-        parts = d.split("_")
-        date_str = parts[2]
-        page = int(parts[3]) if len(parts) > 3 else 0
-        text, kb = render_day(date_str, data, page)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d == "cal_menu":
-        text, kb = render_cal_menu(data)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d == "method":
-        text, kb = render_method(data)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
+        p=d.split("_"); ds=p[1]; pg=int(p[2]) if len(p)>2 else 0
+        t,kb=render_day(ds,data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d=="cal_menu":
+        t,kb=render_cal(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d=="method":
+        t,kb=render_method(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
     elif d.startswith("phase_"):
-        text, kb = render_phase(d[6:], data)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True)
-
+        t,kb=render_phase(d[6:],data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown",disable_web_page_preview=True)
     elif d.startswith("habits_"):
-        off = int(d[7:])
-        text, kb = render_habits(data, off)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+        t,kb=render_habits(data,int(d[7:])); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d=="stats":
+        t,kb=render_stats(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d=="guide":
+        await q.edit_message_text(GUIDE_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
+    elif d=="sleep_tips":
+        await q.edit_message_text(SLEEP_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
 
-    elif d == "stats":
-        text, kb = render_stats(data)
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d == "sched_settings":
-        text, kb = render_sched_settings()
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d == "edit_default_list":
-        text, kb = render_edit_default_list()
-        await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d.startswith("edit_default_"):
-        bid = d[13:]
-        blk = next((b for b in DEFAULT_BLOCKS if b["id"] == bid), None)
-        if blk:
-            ctx.user_data["edit_default_id"] = bid
-            ctx.user_data["edit_step"] = "field"
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🕐 Время", callback_data="edit_field_t"),
-                 InlineKeyboardButton("📝 Название", callback_data="edit_field_n")],
-                [InlineKeyboardButton("← Назад", callback_data="edit_default_list")],
-            ])
-            await q.edit_message_text(
-                f"*Редактировать: {blk['t']} {blk['n']}*\nЧто изменить?",
-                reply_markup=kb, parse_mode="Markdown"
-            )
-
-    elif d.startswith("edit_field_"):
-        field = d[11:]
-        ctx.user_data["edit_field"] = field
-        field_name = "время (формат ЧЧ:ММ)" if field == "t" else "название"
-        await q.edit_message_text(f"Введи новое {field_name}:")
-
-    elif d == "reset_sched":
-        await q.edit_message_text(
-            "Сбросить расписание к стандарту?\nВсе изменения удалятся.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Да, сбросить", callback_data="reset_confirm"),
-                 InlineKeyboardButton("❌ Отмена", callback_data="sched_settings")],
-            ])
-        )
-
-    elif d == "reset_confirm":
-        if "custom_blocks" in data:
-            del data["custom_blocks"]
+    # EDITOR
+    elif d=="editor":
+        t,kb=render_editor(); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d.startswith("ed_blk_"):
+        t,kb=render_edit_block(d[7:]); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d.startswith("ed_f_"):
+        parts=d.split("_",3); field=parts[2]; bid=parts[3]
+        ctx.user_data["ed_field"]=field; ctx.user_data["ed_bid"]=bid
+        fname={"t":"время (ЧЧ:ММ)","n":"название","d":"описание"}[field]
+        await q.edit_message_text(f"Введи новое {fname}:")
+    elif d.startswith("ed_p_"):
+        parts=d.split("_",3); direction=parts[2]; bid=parts[3]
+        for b in DEFAULT:
+            if b["id"]==bid:
+                p=b.get("p",3)
+                if direction=="up" and p>1: b["p"]=p-1
+                elif direction=="dn" and p<4: b["p"]=p+1
         save(data)
-        await q.edit_message_text("✅ Расписание сброшено к стандарту.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню", callback_data="menu")]]))
-
-    elif d.startswith("tog_"):
-        parts = d.split("_", 2)
-        if parts[1] == "prog":
-            _, _, rest = d.split("_", 2)
-            ph_id, idx = rest.rsplit("_", 1)
-            key = f"{ph_id}_{idx}"
-            data.setdefault("prog", {})[key] = not data["prog"].get(key, False)
-            save(data)
-            text, kb = render_phase(ph_id, data)
-            await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True)
-
-        elif parts[1] == "hab":
-            _, _, rest = d.split("_", 2)
-            parts2 = rest.rsplit("_", 1)
-            off = int(parts2[1]) if len(parts2) > 1 and parts2[1].lstrip("-").isdigit() else 0
-            dc = parts2[0].rsplit("_", 1)
-            cat = dc[-1]
-            date_str = dc[0]
-            key = f"{date_str}_{cat}"
-            data.setdefault("hab", {})[key] = not data["hab"].get(key, False)
-            save(data)
-            text, kb = render_habits(data, off)
-            await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-        else:
-            # tog_{date}_{bid}_{page}
-            rest = d[4:]
-            date_str = rest[:10]
-            remainder = rest[11:]
-            parts3 = remainder.rsplit("_", 1)
-            page = int(parts3[1]) if len(parts3) > 1 and parts3[1].isdigit() else 0
-            bid = parts3[0]
-            data.setdefault("days", {}).setdefault(date_str, {"checked": {}}).setdefault("checked", {})
-            checked = data["days"][date_str]["checked"]
-            checked[bid] = not checked.get(bid, False)
-            data.setdefault("hab", {})
-            if checked[bid]:
-                if bid == "piano": data["hab"][f"{date_str}_piano"] = True
-                elif bid == "flute": data["hab"][f"{date_str}_flute"] = True
-                elif bid in ("mix","ear","solf"): data["hab"][f"{date_str}_mix"] = True
-                elif bid == "rev": data["hab"][f"{date_str}_review"] = True
-            save(data)
-            text, kb = render_day(date_str, data, page)
-            await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
-
-    elif d.startswith("add_evt_"):
-        date_str = d[8:]
-        ctx.user_data["add_evt_date"] = date_str
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📌 Дела", callback_data=f"evtt_busy_{date_str}"),
-             InlineKeyboardButton("👤 Личное", callback_data=f"evtt_personal_{date_str}")],
-            [InlineKeyboardButton("← Назад", callback_data=f"day_{date_str}_0")],
-        ])
-        await q.edit_message_text("Выбери тип события:", reply_markup=kb)
-
-    elif d.startswith("evtt_"):
-        parts = d.split("_", 2)
-        evt_type = parts[1]
-        date_str = parts[2]
-        ctx.user_data["add_evt_date"] = date_str
-        ctx.user_data["add_evt_type"] = evt_type
-        await q.edit_message_text(f"Введи описание события:\n(например: Встреча 14:00)")
-
-    elif d.startswith("add_blk_"):
-        date_str = d[8:]
-        ctx.user_data["add_blk_date"] = date_str
-        ctx.user_data["add_blk_step"] = "time"
+        t,kb=render_edit_block(bid); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d.startswith("ed_del_"):
+        bid=d[7:]
+        for i,b in enumerate(DEFAULT):
+            if b["id"]==bid: DEFAULT.pop(i); break
+        save(data)
+        t,kb=render_editor(); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d=="ed_add":
+        ctx.user_data["ed_add_step"]="time"
         await q.edit_message_text("Введи время нового блока (ЧЧ:ММ):")
 
-    elif d.startswith("edit_blk_"):
-        parts = d.split("_")
-        date_str = parts[2]
-        bid = parts[3]
-        page = int(parts[4]) if len(parts) > 4 else 0
-        ctx.user_data["edit_blk_date"] = date_str
-        ctx.user_data["edit_blk_id"] = bid
-        ctx.user_data["edit_blk_page"] = page
-        blocks = get_blocks(date_str, data)
-        blk = next((b for b in blocks if b["id"] == bid), None)
-        if blk:
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🕐 Время", callback_data="eblk_t"),
-                 InlineKeyboardButton("📝 Название", callback_data="eblk_n")],
-                [InlineKeyboardButton("🗑 Удалить блок", callback_data="eblk_del")],
-                [InlineKeyboardButton("← Назад", callback_data=f"day_{date_str}_{page}")],
-            ])
-            await q.edit_message_text(f"*{blk['t']} {blk['n']}*\nЧто изменить?", reply_markup=kb, parse_mode="Markdown")
-
-    elif d.startswith("eblk_"):
-        action = d[5:]
-        if action == "del":
-            date_str = ctx.user_data.get("edit_blk_date")
-            bid = ctx.user_data.get("edit_blk_id")
-            page = ctx.user_data.get("edit_blk_page", 0)
-            blocks = get_blocks(date_str, data)
-            blocks = [b for b in blocks if b["id"] != bid]
-            data.setdefault("custom_blocks", {})[date_str] = blocks
+    # TOGGLE
+    elif d.startswith("tog_"):
+        parts=d.split("_",2)
+        if parts[1]=="prog":
+            rest=d[9:]; ph_id,idx=rest.rsplit("_",1); key=f"{ph_id}_{idx}"
+            data.setdefault("prog",{})[key]=not data["prog"].get(key,False)
             save(data)
-            text, kb = render_day(date_str, data, page)
-            await q.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+            t,kb=render_phase(ph_id,data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown",disable_web_page_preview=True)
+        elif parts[1]=="hab":
+            rest=d[8:]; bits=rest.rsplit("_",1); off=int(bits[1]) if bits[1].lstrip("-").isdigit() else 0
+            dc=bits[0].rsplit("_",1); cat=dc[-1]; ds=dc[0]
+            data.setdefault("hab",{})[f"{ds}_{cat}"]=not data["hab"].get(f"{ds}_{cat}",False)
+            save(data)
+            t,kb=render_habits(data,off); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
         else:
-            ctx.user_data["edit_blk_field"] = action
-            fname = "время (ЧЧ:ММ)" if action == "t" else "название"
-            await q.edit_message_text(f"Введи новое {fname}:")
+            rest=d[4:]; ds=rest[:10]; rem=rest[11:]
+            p2=rem.rsplit("_",1); pg=int(p2[1]) if len(p2)>1 and p2[1].isdigit() else 0; bid=p2[0]
+            data.setdefault("days",{}).setdefault(ds,{"checked":{}}).setdefault("checked",{})
+            ck=data["days"][ds]["checked"]; ck[bid]=not ck.get(bid,False)
+            data.setdefault("hab",{})
+            if ck[bid]:
+                if bid=="piano": data["hab"][f"{ds}_piano"]=True
+                elif bid=="flute": data["hab"][f"{ds}_flute"]=True
+                elif bid in("mix","ear","solf"): data["hab"][f"{ds}_mix"]=True
+                elif bid=="rev": data["hab"][f"{ds}_review"]=True
+            save(data)
+            t,kb=render_day(ds,data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
 
-    elif d == "noop":
-        pass
+    # ADD EVENT
+    elif d.startswith("add_evt_"):
+        ds=d[8:]; ctx.user_data["evt_ds"]=ds
+        kb=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📌 Дела", callback_data=f"evtt_busy_{ds}"),
+             InlineKeyboardButton("👤 Личное", callback_data=f"evtt_personal_{ds}")],
+            [InlineKeyboardButton("← Назад", callback_data=f"day_{ds}_0")],
+        ])
+        await q.edit_message_text("Выбери тип события:", reply_markup=kb)
+    elif d.startswith("evtt_"):
+        p=d.split("_",2); etype=p[1]; ds=p[2]
+        ctx.user_data["evt_ds"]=ds; ctx.user_data["evt_type"]=etype; ctx.user_data["evt_step"]="name"
+        await q.edit_message_text(
+            "Введи название и время события:\n\n"
+            "Формат: *Название ЧЧ:ММ–ЧЧ:ММ*\n"
+            "Пример: `Встреча с врачом 14:00–15:00`\n\n"
+            "Расписание автоматически сдвинется по приоритетам.",
+            parse_mode="Markdown"
+        )
+    elif d=="noop": pass
 
-async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    data = load()
-    text = update.message.text.strip()
+async def msg_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    data=load(); text=update.message.text.strip()
 
-    # Добавление события
-    if ctx.user_data.get("add_evt_date") and ctx.user_data.get("add_evt_type"):
-        date_str = ctx.user_data.pop("add_evt_date")
-        evt_type = ctx.user_data.pop("add_evt_type")
-        data.setdefault("cal", {}).setdefault(date_str, []).append({"type": evt_type, "text": text})
+    if ctx.user_data.get("evt_step")=="name":
+        ds=ctx.user_data.pop("evt_ds"); etype=ctx.user_data.pop("evt_type"); ctx.user_data.pop("evt_step",None)
+        m=re.search(r"(\d{1,2}:\d{2})\s*[–\-]\s*(\d{1,2}:\d{2})",text)
+        if m:
+            t_from,t_to=m.group(1),m.group(2)
+            name=re.sub(r"\d{1,2}:\d{2}\s*[–\-]\s*\d{1,2}:\d{2}","",text).strip()
+            evt={"type":etype,"text":name,"t_from":t_from,"t_to":t_to}
+        else:
+            evt={"type":etype,"text":text}
+        data.setdefault("cal",{}).setdefault(ds,[]).append(evt)
         save(data)
-        t, kb = render_day(date_str, data, 0)
-        await update.message.reply_text("✅ Событие добавлено!", parse_mode="Markdown")
-        await update.message.reply_text(t, reply_markup=kb, parse_mode="Markdown")
+        t,kb=render_day(ds,data,0)
+        await update.message.reply_text("✅ Событие добавлено! Расписание пересчитано.", parse_mode="Markdown")
+        await update.message.reply_text(t,reply_markup=kb,parse_mode="Markdown")
         return
 
-    # Добавление блока — шаг 1: время
-    if ctx.user_data.get("add_blk_step") == "time":
-        if re.match(r"^\d{1,2}:\d{2}$", text):
-            ctx.user_data["add_blk_time"] = text
-            ctx.user_data["add_blk_step"] = "name"
+    if ctx.user_data.get("ed_field") and ctx.user_data.get("ed_bid"):
+        field=ctx.user_data.pop("ed_field"); bid=ctx.user_data.pop("ed_bid")
+        if field=="t" and not re.match(r"^\d{1,2}:\d{2}$",text):
+            await update.message.reply_text("Неверный формат. Введи ЧЧ:ММ:")
+            ctx.user_data["ed_field"]=field; ctx.user_data["ed_bid"]=bid; return
+        for b in DEFAULT:
+            if b["id"]==bid: b[field]=text
+        if field=="t": DEFAULT.sort(key=lambda b: tmin(b["t"]))
+        save(data)
+        await update.message.reply_text("✅ Изменено!")
+        t,kb=render_editor(); await update.message.reply_text(t,reply_markup=kb,parse_mode="Markdown")
+        return
+
+    if ctx.user_data.get("ed_add_step")=="time":
+        if re.match(r"^\d{1,2}:\d{2}$",text):
+            ctx.user_data["ed_add_t"]=text; ctx.user_data["ed_add_step"]="name"
             await update.message.reply_text("Введи название блока:")
         else:
-            await update.message.reply_text("Неверный формат. Введи время в формате ЧЧ:ММ:")
-        return
-
-    # Добавление блока — шаг 2: название
-    if ctx.user_data.get("add_blk_step") == "name":
-        date_str = ctx.user_data.pop("add_blk_date")
-        t_str = ctx.user_data.pop("add_blk_time")
-        ctx.user_data.pop("add_blk_step", None)
-        blocks = get_blocks(date_str, data)
-        new_blk = {"id": f"custom_{t_str.replace(':','')}", "t": t_str, "n": text, "d": "", "dur": 60}
-        blocks = insert_and_shift(blocks, new_blk)
-        data.setdefault("custom_blocks", {})[date_str] = blocks
-        save(data)
-        t2, kb = render_day(date_str, data, 0)
-        await update.message.reply_text("✅ Блок добавлен, расписание сдвинуто!", parse_mode="Markdown")
-        await update.message.reply_text(t2, reply_markup=kb, parse_mode="Markdown")
-        return
-
-    # Редактирование блока дня
-    if ctx.user_data.get("edit_blk_field"):
-        field = ctx.user_data.pop("edit_blk_field")
-        date_str = ctx.user_data.get("edit_blk_date")
-        bid = ctx.user_data.get("edit_blk_id")
-        page = ctx.user_data.get("edit_blk_page", 0)
-        if field == "t" and not re.match(r"^\d{1,2}:\d{2}$", text):
             await update.message.reply_text("Неверный формат. Введи ЧЧ:ММ:")
-            ctx.user_data["edit_blk_field"] = field
-            return
-        blocks = get_blocks(date_str, data)
-        for b in blocks:
-            if b["id"] == bid:
-                b[field] = text
-        if field == "t":
-            blocks = sorted(blocks, key=lambda b: time_to_min(b["t"]))
-        data.setdefault("custom_blocks", {})[date_str] = blocks
-        save(data)
-        t2, kb = render_day(date_str, data, page)
-        await update.message.reply_text("✅ Изменено!", parse_mode="Markdown")
-        await update.message.reply_text(t2, reply_markup=kb, parse_mode="Markdown")
         return
 
-    # Редактирование дефолтного блока
-    if ctx.user_data.get("edit_field") and ctx.user_data.get("edit_default_id"):
-        field = ctx.user_data.pop("edit_field")
-        bid = ctx.user_data.pop("edit_default_id")
-        if field == "t" and not re.match(r"^\d{1,2}:\d{2}$", text):
-            await update.message.reply_text("Неверный формат. Введи ЧЧ:ММ:")
-            ctx.user_data["edit_field"] = field
-            ctx.user_data["edit_default_id"] = bid
-            return
-        for b in DEFAULT_BLOCKS:
-            if b["id"] == bid:
-                b[field] = text
+    if ctx.user_data.get("ed_add_step")=="name":
+        t_str=ctx.user_data.pop("ed_add_t"); ctx.user_data.pop("ed_add_step",None)
+        DEFAULT.append({"id":f"c_{t_str.replace(':','')}","t":t_str,"n":text,"d":"","dur":60,"p":3})
+        DEFAULT.sort(key=lambda b: tmin(b["t"]))
         save(data)
-        await update.message.reply_text("✅ Дефолтное расписание обновлено!", reply_markup=main_menu_kb())
+        await update.message.reply_text("✅ Блок добавлен!")
+        t,kb=render_editor(); await update.message.reply_text(t,reply_markup=kb,parse_mode="Markdown")
         return
 
     await update.message.reply_text("Используй /start для меню")
 
 # ─── REMINDERS ───────────────────────────────────────────────────────────────
 
-async def send_reminder(ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id = ctx.job.data["chat_id"]
-    msg = ctx.job.data["msg"]
-    try:
-        await ctx.bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
-    except Exception as e:
-        logger.error(f"Reminder error: {e}")
+async def reminder(ctx):
+    try: await ctx.bot.send_message(chat_id=ctx.job.data["cid"],text=ctx.job.data["msg"],parse_mode="Markdown")
+    except Exception as e: logger.error(e)
 
-async def daily_review(ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id = ctx.job.data["chat_id"]
-    text = ("*🌙 Ревью дня*\n\n"
-            "Запиши быстро:\n\n"
-            "✅ Что сделал:\n\n"
-            "💡 Что получилось хорошо:\n\n"
-            "⚡ Что было сложно:\n\n"
-            "📌 Завтра:")
-    try:
-        await ctx.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
-    except Exception as e:
-        logger.error(f"Review error: {e}")
-
-def setup_reminders(app, chat_id):
-    jq = app.job_queue
-    reminders = [
-        ("07:25", "⏰ *Подъём через 5 минут!*\nВода, умыться, без телефона."),
-        ("07:30", "🌅 *Подъём!*\nВода, умыться, выглянуть в окно. Телефон не трогать."),
-        ("09:30", "🟣 *Сольфеджио* — 30 мин"),
-        ("10:10", "🔵 *Фортепиано* — 45 мин, гаммы и этюд"),
-        ("11:05", "🔵 *Флейта* — 30 мин, долгие ноты"),
-        ("11:45", "🟣 *Ear Training* — 20 мин"),
-        ("12:50", "🔵 *Микс / Pro Tools* — 2 часа"),
-        ("19:25", "🔴 *Ревью дня через 5 минут!*"),
-        ("21:55", "🌙 *Подготовка ко сну*\nУбери телефон, приглуши свет."),
-    ]
-    for t_str, msg in reminders:
-        h, m = map(int, t_str.split(":"))
-        run_time = dtime(hour=h, minute=m, tzinfo=TZ)
-        jq.run_daily(send_reminder, time=run_time, data={"chat_id": chat_id, "msg": msg})
-
-    jq.run_daily(daily_review, time=dtime(hour=19, minute=30, tzinfo=TZ), data={"chat_id": chat_id})
+def setup_reminders(app, cid):
+    jq=app.job_queue
+    for t_str,msg_text in [
+        ("07:25","⏰ *Подъём через 5 минут!*"),
+        ("07:30","🌅 *Подъём!* Вода, умыться, без телефона 20 мин."),
+        ("09:30","🟣 *Сольфеджио* — 30 мин"),
+        ("10:10","🔵 *Фортепиано* — 45 мин, гаммы и этюд"),
+        ("11:05","🔵 *Флейта* — 30 мин, долгие ноты"),
+        ("11:45","🟣 *Ear Training* — 20 мин"),
+        ("12:50","🔵 *Микс / Pro Tools* — 2 часа"),
+        ("19:00","🔴 *Ревью дня!*\n\nЧто сделал:\n\nЧто получилось:\n\nЧто было сложно:\n\nЗавтра:"),
+        ("20:55","🌙 *Готовься ко сну*\nУбери телефон. Приглуши свет."),
+    ]:
+        h,m=map(int,t_str.split(":"))
+        jq.run_daily(reminder,time=dtime(hour=h,minute=m,tzinfo=TZ),data={"cid":cid,"msg":msg_text})
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
-    chat_id = CHAT_ID
-    if chat_id:
-        setup_reminders(app, chat_id)
-        logger.info(f"Reminders set for chat {chat_id}")
-    else:
-        logger.warning("CHAT_ID not set — reminders disabled")
-
+    app=Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start",start))
+    app.add_handler(CommandHandler("myid",myid))
+    app.add_handler(CallbackQueryHandler(btn))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,msg_handler))
+    if CHAT_ID: setup_reminders(app,CHAT_ID); logger.info(f"Reminders → {CHAT_ID}")
     logger.info("Bot started")
     app.run_polling()
 
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
