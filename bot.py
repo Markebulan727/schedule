@@ -426,7 +426,6 @@ def main_kb():
         [InlineKeyboardButton("✏️ Редактор", callback_data="editor"),
          InlineKeyboardButton("📋 Памятка", callback_data="guide")],
         [InlineKeyboardButton("😴 Сон и фокус", callback_data="sleep_tips")],
-        [InlineKeyboardButton("🚭 Бросаю курить (Табекс)", callback_data="tabex_menu")],
     ])
 
 # ─── DAY VIEW ────────────────────────────────────────────────────────────────
@@ -679,104 +678,7 @@ def render_edit_block(bid):
     ])
     return text, kb
 
-# ─── TABEX ───────────────────────────────────────────────────────────────────
-
-TABEX_SCHEME = {
-    # день: [список времён приёма]
-    1:  ["08:00","10:00","12:00","14:00","16:00","18:00","20:00","22:00"],
-    2:  ["08:00","10:00","12:00","14:00","16:00","18:00","20:00","22:00"],
-    3:  ["08:00","10:00","12:00","14:00","16:00","18:00","20:00","22:00"],
-    4:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    5:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    6:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    7:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    8:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    9:  ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    10: ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    11: ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    12: ["08:00","10:30","13:00","15:30","18:00","20:30"],
-    13: ["08:00","11:00","14:00","17:00","20:00"],
-    14: ["08:00","11:00","14:00","17:00","20:00"],
-    15: ["08:00","11:00","14:00","17:00","20:00"],
-    16: ["08:00","11:00","14:00","17:00","20:00"],
-    17: ["08:00","13:00","20:00"],
-    18: ["08:00","13:00","20:00"],
-    19: ["08:00","13:00","20:00"],
-    20: ["08:00","13:00","20:00"],
-    21: ["08:00","20:00"],
-    22: ["08:00","20:00"],
-    23: ["08:00","20:00"],
-    24: ["08:00","20:00"],
-    25: ["08:00","20:00"],
-}
-
-def tabex_day_num(data):
-    start = data.get("tabex_start")
-    if not start: return None
-    start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=TZ)
-    today_dt = datetime.strptime(today_key(), "%Y-%m-%d").replace(tzinfo=TZ)
-    return (today_dt - start_dt).days + 1
-
-def render_tabex_menu(data):
-    day_num = tabex_day_num(data)
-    if not day_num or day_num > 25:
-        text = ("*🚭 Бросаю курить — Табекс*\n\n"
-                "Табекс принимается 25 дней по схеме производителя.\n"
-                "Я добавлю уведомления автоматически по расписанию.\n\n"
-                "⚠️ Важно: после 5-го дня нужно полностью бросить курить.\n\n"
-                "Когда начинаешь?")
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📅 Начинаю сегодня", callback_data="tabex_start_today")],
-            [InlineKeyboardButton("← Меню", callback_data="menu")],
-        ])
-    else:
-        scheme = TABEX_SCHEME.get(day_num, [])
-        start = data.get("tabex_start","")
-        now = now_a()
-        current_min = now.hour*60+now.minute
-        taken = data.get("tabex_taken",{}).get(today_key(),[])
-        done = len(taken)
-        text = (f"*🚭 Табекс — День {day_num}/25*\n"
-                f"Начало: {start}\n\n"
-                f"Таблеток сегодня: {done}/{len(scheme)}\n\n"
-                "*Расписание приёмов:*\n")
-        for t in scheme:
-            mark = "✅" if t in taken else ("⏰" if tmin(t) <= current_min else "⬜")
-            text += f"{mark} {t}\n"
-
-        if day_num == 5:
-            text += "\n⚠️ *С сегодняшнего дня — полный отказ от сигарет!*"
-
-        days_left = 25 - day_num
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Принял таблетку", callback_data="tabex_took")],
-            [InlineKeyboardButton(f"📊 Прогресс: осталось {days_left} дн.", callback_data="noop")],
-            [InlineKeyboardButton("🔄 Сбросить курс", callback_data="tabex_reset")],
-            [InlineKeyboardButton("← Меню", callback_data="menu")],
-        ])
-    return text, kb
-
-async def setup_tabex_reminders(app, cid, data):
-    """Устанавливает напоминания Табекса на сегодня"""
-    jq = app.job_queue
-    day_num = tabex_day_num(data)
-    if not day_num or day_num > 25: return
-    scheme = TABEX_SCHEME.get(day_num, [])
-    taken = data.get("tabex_taken",{}).get(today_key(),[])
-    now = now_a()
-    for t_str in scheme:
-        if t_str in taken: continue
-        h,m = map(int, t_str.split(":"))
-        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        if target > now:
-            delay = (target - now).total_seconds()
-            jq.run_once(
-                reminder,
-                when=delay,
-                data={"cid": cid, "msg": f"💊 *Табекс* — время принять таблетку ({t_str})"}
-            )
-
-
+# ─── HANDLERS ────────────────────────────────────────────────────────────────
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Привет, Марк!\n\nВыбери раздел:", reply_markup=main_kb(), parse_mode="Markdown")
@@ -810,34 +712,6 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(GUIDE_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
     elif d=="sleep_tips":
         await q.edit_message_text(SLEEP_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
-
-    elif d=="tabex_menu":
-        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
-
-    elif d=="tabex_start_today":
-        data["tabex_start"]=today_key()
-        data.setdefault("tabex_taken",{})
-        save(data)
-        await setup_tabex_reminders(ctx.application, CHAT_ID, data)
-        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
-
-    elif d=="tabex_took":
-        day_num=tabex_day_num(data)
-        scheme=TABEX_SCHEME.get(day_num,[])
-        taken=data.setdefault("tabex_taken",{}).setdefault(today_key(),[])
-        now=now_a(); current_min=now.hour*60+now.minute
-        # Отмечаем ближайший непринятый приём
-        for t_str in scheme:
-            if t_str not in taken:
-                taken.append(t_str)
-                save(data)
-                break
-        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
-
-    elif d=="tabex_reset":
-        data.pop("tabex_start",None); data.pop("tabex_taken",None)
-        save(data)
-        t,kb=render_tabex_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
 
     # EDITOR
     elif d=="editor":
@@ -1010,16 +884,7 @@ def main():
     app.add_handler(CommandHandler("myid",myid))
     app.add_handler(CallbackQueryHandler(btn))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,msg_handler))
-    if CHAT_ID:
-        setup_reminders(app,CHAT_ID)
-        # Запускаем напоминания Табекса если курс активен
-        data = load()
-        if data.get("tabex_start"):
-            import asyncio
-            async def startup_tabex(app):
-                await setup_tabex_reminders(app, CHAT_ID, load())
-            app.post_init = startup_tabex
-        logger.info(f"Reminders → {CHAT_ID}")
+    if CHAT_ID: setup_reminders(app,CHAT_ID); logger.info(f"Reminders → {CHAT_ID}")
     logger.info("Bot started")
     app.run_polling()
 
