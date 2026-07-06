@@ -13,18 +13,37 @@ logger = logging.getLogger(__name__)
 TZ = ZoneInfo("Asia/Almaty")
 TOKEN = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "560819891")
-DATA_FILE = "data.json"
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://mark:Salam123@markebulanschedulebot.yyu6gaf.mongodb.net/?appName=MarkebulanScheduleBot")
+
+from pymongo import MongoClient
+
+_client = None
+_col = None
+
+def get_col():
+    global _client, _col
+    if _col is None:
+        _client = MongoClient(MONGO_URL)
+        _col = _client["markbot"]["data"]
+    return _col
 
 def load():
     try:
-        with open(DATA_FILE) as f:
-            return json.load(f)
-    except:
-        return {"days":{}, "cal":{}, "prog":{}, "hab":{}, "finance":[], "notes":[], "tabex_start":None, "tabex_taken":{}}
+        col = get_col()
+        doc = col.find_one({"_id": "main"})
+        if doc:
+            doc.pop("_id", None)
+            return doc
+    except Exception as e:
+        logger.error(f"MongoDB load error: {e}")
+    return {"days":{}, "cal":{}, "prog":{}, "hab":{}, "finance":[], "notes":[], "tabex_start":None, "tabex_taken":{}}
 
 def save(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        col = get_col()
+        col.replace_one({"_id": "main"}, {"_id": "main", **data}, upsert=True)
+    except Exception as e:
+        logger.error(f"MongoDB save error: {e}")
 
 def now_a(): return datetime.now(TZ)
 def today_key(): return now_a().strftime("%Y-%m-%d")
@@ -262,18 +281,24 @@ def render_fin_cats(data):
 
 def render_fin_history(data, pg=0):
     fin = data.get("finance", [])
-    fin_sorted = sorted(fin, key=lambda x: x["date"], reverse=True)
-    per = 10; total = max(1,(len(fin_sorted)+per-1)//per)
+    fin_sorted = sorted(enumerate(fin), key=lambda x: x[1]["date"], reverse=True)
+    per = 8; total = max(1,(len(fin_sorted)+per-1)//per)
     pg = max(0,min(pg,total-1))
     visible = fin_sorted[pg*per:(pg+1)*per]
     lines = [f"*📋 История ({pg+1}/{total})*\n"]
-    for f in visible:
+    for orig_idx, f in visible:
         sign = "📉" if f["type"]=="exp" else "📈"
         lines.append(f"{sign} {f['date']} | {f['cat']}\n    {f['name']} — {f['amount']:,.0f} ₸")
+    kb_rows = []
+    for orig_idx, f in visible:
+        short = f["name"][:20]+"…" if len(f["name"])>20 else f["name"]
+        kb_rows.append([InlineKeyboardButton(
+            f"🗑 {short} {f['amount']:,.0f}₸",
+            callback_data=f"fin_del_{orig_idx}"
+        )])
     nav = []
     if pg > 0: nav.append(InlineKeyboardButton("◀", callback_data=f"fin_history_{pg-1}"))
     if pg < total-1: nav.append(InlineKeyboardButton("▶", callback_data=f"fin_history_{pg+1}"))
-    kb_rows = []
     if nav: kb_rows.append(nav)
     kb_rows.append([InlineKeyboardButton("← Финансы", callback_data="finance")])
     return "\n".join(lines), InlineKeyboardMarkup(kb_rows)
@@ -620,6 +645,10 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         t,kb=render_fin_cats(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
     elif d.startswith("fin_history_"):
         pg=int(d[12:]); t,kb=render_fin_history(data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d.startswith("fin_del_"):
+        idx=int(d[8:]); fin=data.get("finance",[])
+        if idx<len(fin): fin.pop(idx)
+        save(data); t,kb=render_fin_history(data,0); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
     elif d=="fin_add_exp":
         ctx.user_data["fin_type"]="exp"
         ctx.user_data["fin_step"]="name"
