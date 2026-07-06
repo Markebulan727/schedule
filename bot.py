@@ -79,7 +79,8 @@ DEFAULT = [
     {"id":"b3",    "t":"16:05","n":"Перерыв",            "d":"15 мин","dur":15,"p":4},
     {"id":"read",  "t":"16:20","n":"Чтение / теория",    "d":"60 мин","dur":60,"p":3},
     {"id":"sport", "t":"17:20","n":"Прогулка / спорт",   "d":"45 мин","dur":45,"p":2},
-    {"id":"free",  "t":"18:05","n":"Свободное время",    "d":"Личные дела, отдых","dur":55,"p":4},
+    {"id":"free",  "t":"18:05","n":"Свободное время",    "d":"Личные дела, отдых","dur":25,"p":4},
+    {"id":"dinner","t":"18:30","n":"Ужин",               "d":"30 мин","dur":30,"p":2},
     {"id":"rev",   "t":"19:00","n":"Ревью дня",          "d":"5 мин — записать в заметки","dur":10,"p":2},
     {"id":"wind",  "t":"21:00","n":"Подготовка ко сну",  "d":"Убрать телефон, приглушить свет","dur":60,"p":2},
     {"id":"slp",   "t":"22:00","n":"Отбой",              "d":"Цель — до 22:00","dur":0,"p":1},
@@ -452,6 +453,7 @@ def main_kb():
          InlineKeyboardButton("📋 Памятка", callback_data="guide")],
         [InlineKeyboardButton("😴 Сон и фокус", callback_data="sleep_tips"),
          InlineKeyboardButton("🚭 Табекс", callback_data="tabex_menu")],
+        [InlineKeyboardButton("📔 Ревью дня", callback_data="review_menu_0")],
     ])
 
 # ─── DAY VIEW ────────────────────────────────────────────────────────────────
@@ -546,7 +548,66 @@ def render_habits(data, off=0):
     kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
     return f"*🔥 Привычки*\n{f.day} {months[f.month-1]} – {l.day} {months[l.month-1]}", InlineKeyboardMarkup(kb)
 
-def render_stats(data):
+# ─── REVIEW ──────────────────────────────────────────────────────────────────
+
+def render_review_menu(data, pg=0):
+    reviews = data.get("reviews", [])
+    reviews_sorted = sorted(reviews, key=lambda x: x["date"], reverse=True)
+    per = 5; total = max(1,(len(reviews_sorted)+per-1)//per)
+    pg = max(0,min(pg,total-1))
+    visible = reviews_sorted[pg*per:(pg+1)*per]
+
+    today = today_key()
+    has_today = any(r["date"]==today for r in reviews)
+
+    text = "*📔 Ревью дня*\n\nЗдесь хранятся твои ежедневные записи.\n"
+    if has_today:
+        r = next(r for r in reviews if r["date"]==today)
+        text += f"\n*Сегодня ({today}):*\n{r['text'][:200]}{'…' if len(r['text'])>200 else ''}\n"
+
+    kb = []
+    if not has_today:
+        kb.append([InlineKeyboardButton("✍️ Написать ревью сегодня", callback_data="review_add")])
+    else:
+        kb.append([InlineKeyboardButton("✏️ Редактировать сегодня", callback_data="review_edit_today")])
+
+    if reviews_sorted:
+        kb.append([InlineKeyboardButton("📚 История ревью", callback_data="review_history_0")])
+
+    kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
+    return text, InlineKeyboardMarkup(kb)
+
+def render_review_history(data, pg=0):
+    reviews = data.get("reviews", [])
+    reviews_sorted = sorted(reviews, key=lambda x: x["date"], reverse=True)
+    per = 1; total = max(1, len(reviews_sorted))
+    pg = max(0,min(pg,total-1))
+
+    if not reviews_sorted:
+        return "*📚 История пустая*\nНапиши первое ревью!", InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="review_menu_0")]])
+
+    r = reviews_sorted[pg]
+    orig_idx = next(i for i,x in enumerate(reviews) if x["date"]==r["date"])
+
+    d = datetime.strptime(r["date"],"%Y-%m-%d")
+    N = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
+    M = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"]
+    date_label = f"{N[d.weekday()]}, {d.day} {M[d.month-1]}"
+
+    text = f"*📔 {date_label}*\n({pg+1}/{total})\n\n{r['text']}"
+
+    nav = []
+    if pg > 0: nav.append(InlineKeyboardButton("◀ Новее", callback_data=f"review_history_{pg-1}"))
+    if pg < total-1: nav.append(InlineKeyboardButton("Старее ▶", callback_data=f"review_history_{pg+1}"))
+
+    kb = []
+    if nav: kb.append(nav)
+    kb.append([InlineKeyboardButton("🗑 Удалить", callback_data=f"review_del_{orig_idx}"),
+               InlineKeyboardButton("✏️ Редактировать", callback_data=f"review_edit_{orig_idx}")])
+    kb.append([InlineKeyboardButton("← Назад", callback_data="review_menu_0")])
+    return text, InlineKeyboardMarkup(kb)
+
+
     hab=data.get("hab",{}); prog=data.get("prog",{})
     streak=0; tk=today_key()
     for i in range(365):
@@ -637,6 +698,37 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(GUIDE_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
     elif d=="sleep_tips":
         await q.edit_message_text(SLEEP_TEXT,reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Меню",callback_data="menu")]]),parse_mode="Markdown")
+
+    # REVIEW
+    elif d.startswith("review_menu_"):
+        pg=int(d[12:]); t,kb=render_review_menu(data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d=="review_add":
+        ctx.user_data["review_step"]="add"
+        await q.edit_message_text(
+            "📔 *Ревью дня*\n\nНапиши как прошёл день:\n\n"
+            "Например:\n"
+            "✅ Сделал: сольфеджио, фортепиано\n"
+            "💡 Хорошо: вспомнил аппликатуру\n"
+            "⚡ Сложно: не успел микс\n"
+            "📌 Завтра: закончить PT лекцию 3",
+            parse_mode="Markdown"
+        )
+    elif d=="review_edit_today":
+        today = today_key()
+        reviews = data.get("reviews",[])
+        idx = next((i for i,r in enumerate(reviews) if r["date"]==today), None)
+        if idx is not None:
+            ctx.user_data["review_step"]="edit"; ctx.user_data["review_idx"]=idx
+            await q.edit_message_text("✏️ Введи новый текст ревью:")
+    elif d.startswith("review_edit_"):
+        idx=int(d[12:]); ctx.user_data["review_step"]="edit"; ctx.user_data["review_idx"]=idx
+        await q.edit_message_text("✏️ Введи новый текст ревью:")
+    elif d.startswith("review_del_"):
+        idx=int(d[11:]); reviews=data.get("reviews",[])
+        if idx<len(reviews): reviews.pop(idx)
+        save(data); t,kb=render_review_menu(data); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d.startswith("review_history_"):
+        pg=int(d[15:]); t,kb=render_review_history(data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
 
     # FINANCE
     elif d=="finance":
@@ -768,6 +860,28 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def msg_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data=load(); text=update.message.text.strip()
+
+    # REVIEW
+    if ctx.user_data.get("review_step")=="add":
+        ctx.user_data.pop("review_step",None)
+        reviews=data.setdefault("reviews",[])
+        today=today_key()
+        existing=next((r for r in reviews if r["date"]==today),None)
+        if existing: existing["text"]=text
+        else: reviews.append({"date":today,"text":text})
+        save(data); t,kb=render_review_menu(data)
+        await update.message.reply_text("✅ Ревью сохранено!")
+        await update.message.reply_text(t,reply_markup=kb,parse_mode="Markdown")
+        return
+
+    if ctx.user_data.get("review_step")=="edit":
+        idx=ctx.user_data.pop("review_idx",None); ctx.user_data.pop("review_step",None)
+        reviews=data.get("reviews",[])
+        if idx is not None and idx<len(reviews): reviews[idx]["text"]=text
+        save(data); t,kb=render_review_menu(data)
+        await update.message.reply_text("✅ Ревью обновлено!")
+        await update.message.reply_text(t,reply_markup=kb,parse_mode="Markdown")
+        return
 
     # ADD EVENT
     if ctx.user_data.get("evt_step")=="name":
