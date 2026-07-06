@@ -17,31 +17,31 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb+srv://mark:Salam123@markebulans
 
 from pymongo import MongoClient
 
-_client = None
-_col = None
+_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+_col = _client["markbot"]["data"]
 
-def get_col():
-    global _client, _col
-    if _col is None:
-        _client = MongoClient(MONGO_URL)
-        _col = _client["markbot"]["data"]
-    return _col
+_cache = None
 
 def load():
+    global _cache
+    if _cache is not None:
+        return _cache
     try:
-        col = get_col()
-        doc = col.find_one({"_id": "main"})
+        doc = _col.find_one({"_id": "main"})
         if doc:
             doc.pop("_id", None)
-            return doc
+            _cache = doc
+            return _cache
     except Exception as e:
         logger.error(f"MongoDB load error: {e}")
-    return {"days":{}, "cal":{}, "prog":{}, "hab":{}, "finance":[], "notes":[], "tabex_start":None, "tabex_taken":{}}
+    _cache = {"days":{}, "cal":{}, "prog":{}, "hab":{}, "finance":[], "notes":[], "tabex_start":None, "tabex_taken":{}}
+    return _cache
 
 def save(data):
+    global _cache
+    _cache = data
     try:
-        col = get_col()
-        col.replace_one({"_id": "main"}, {"_id": "main", **data}, upsert=True)
+        _col.replace_one({"_id": "main"}, {"_id": "main", **data}, upsert=True)
     except Exception as e:
         logger.error(f"MongoDB save error: {e}")
 
