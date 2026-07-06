@@ -469,23 +469,51 @@ def render_day(ds, data, pg=0):
     pct = round(done/len(blocks)*100) if blocks else 0
     bar = "█"*(pct//10)+"░"*(10-pct//10)
     lines = [f"*{day_label(ds)}*", f"_{rot}_"]
+
+    # События
     for e in evts:
         icon = {"busy":"📌","personal":"👤"}.get(e.get("type"),"•")
         tr = f" {e['t_from']}–{e['t_to']}" if e.get("t_from") else ""
         lines.append(f"{icon} {e.get('text','')}{tr}")
+
+    # Задачи на день
+    tasks = data.get("tasks",{}).get(ds,[])
+    tasks_checked = data.get("days",{}).get(ds,{}).get("tasks_checked",{})
+    if tasks:
+        lines.append("\n*📋 Задачи:*")
+        for i,task in enumerate(tasks):
+            ck = tasks_checked.get(str(i),False)
+            lines.append(f"{'✅' if ck else '⬜'} {task['text']}")
+
     lines.append(f"\n{bar} {pct}% ({done}/{len(blocks)})\n{'─'*28}")
+
     per=8; total=(len(blocks)+per-1)//per
     pg=max(0,min(pg,total-1))
     visible=blocks[pg*per:(pg+1)*per]
     kb=[]
+
+    # Чекбоксы задач вверху
+    for i,task in enumerate(tasks):
+        ck = tasks_checked.get(str(i),False)
+        label = f"{'✅' if ck else '⬜'} {task['text'][:35]}"
+        kb.append([
+            InlineKeyboardButton(label, callback_data=f"tog_task_{ds}_{i}_{pg}"),
+            InlineKeyboardButton("🗑", callback_data=f"del_task_{ds}_{i}_{pg}"),
+        ])
+
     for b in visible:
         ck=checked.get(b["id"],False)
         kb.append([InlineKeyboardButton(f"{'✅' if ck else '⬜'} {b['t']} {b['n']}", callback_data=f"tog_{ds}_{b['id']}_{pg}")])
+
     nav=[]
     if pg>0: nav.append(InlineKeyboardButton("◀", callback_data=f"day_{ds}_{pg-1}"))
     if pg<total-1: nav.append(InlineKeyboardButton("▶", callback_data=f"day_{ds}_{pg+1}"))
     if nav: kb.append(nav)
-    kb.append([InlineKeyboardButton("➕ Добавить событие", callback_data=f"add_evt_{ds}")])
+
+    kb.append([
+        InlineKeyboardButton("➕ Событие", callback_data=f"add_evt_{ds}"),
+        InlineKeyboardButton("📋 Задача", callback_data=f"add_task_{ds}"),
+    ])
     kb.append([InlineKeyboardButton("← Меню", callback_data="menu")])
     return "\n".join(lines), InlineKeyboardMarkup(kb)
 
@@ -838,8 +866,26 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 elif bid=="rev": data["hab"][f"{ds}_review"]=True
             save(data); t,kb=render_day(ds,data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
 
+    # TASKS
+    elif d.startswith("add_task_"):
+        ds=d[9:]; ctx.user_data["task_ds"]=ds; ctx.user_data["task_step"]="add"
+        await q.edit_message_text(f"📋 Введи задачу на *{day_label(ds)}*:", parse_mode="Markdown")
+    elif d.startswith("tog_task_"):
+        parts=d.split("_"); ds=parts[2]; idx=int(parts[3]); pg=int(parts[4]) if len(parts)>4 else 0
+        data.setdefault("days",{}).setdefault(ds,{}).setdefault("tasks_checked",{})
+        tc=data["days"][ds]["tasks_checked"]; tc[str(idx)]=not tc.get(str(idx),False)
+        save(data); t,kb=render_day(ds,data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+    elif d.startswith("del_task_"):
+        parts=d.split("_"); ds=parts[2]; idx=int(parts[3]); pg=int(parts[4]) if len(parts)>4 else 0
+        tasks=data.get("tasks",{}).get(ds,[])
+        if idx<len(tasks): tasks.pop(idx)
+        data.setdefault("tasks",{})[ds]=tasks
+        tc=data.get("days",{}).get(ds,{}).get("tasks_checked",{})
+        new_tc={str(int(k)-1 if int(k)>idx else int(k)):v for k,v in tc.items() if int(k)!=idx}
+        data.setdefault("days",{}).setdefault(ds,{})["tasks_checked"]=new_tc
+        save(data); t,kb=render_day(ds,data,pg); await q.edit_message_text(t,reply_markup=kb,parse_mode="Markdown")
+
     # ADD EVENT
-    elif d.startswith("add_evt_"):
         ds=d[8:]; ctx.user_data["evt_ds"]=ds
         kb=InlineKeyboardMarkup([
             [InlineKeyboardButton("📌 Дела", callback_data=f"evtt_busy_{ds}"),
@@ -860,6 +906,15 @@ async def btn(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def msg_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data=load(); text=update.message.text.strip()
+
+    # TASKS
+    if ctx.user_data.get("task_step")=="add":
+        ds=ctx.user_data.pop("task_ds"); ctx.user_data.pop("task_step",None)
+        data.setdefault("tasks",{}).setdefault(ds,[]).append({"text":text})
+        save(data); t,kb=render_day(ds,data,0)
+        await update.message.reply_text("✅ Задача добавлена!")
+        await update.message.reply_text(t,reply_markup=kb,parse_mode="Markdown")
+        return
 
     # REVIEW
     if ctx.user_data.get("review_step")=="add":
